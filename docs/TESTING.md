@@ -20,7 +20,9 @@ Useful Supabase Dashboard URLs (replace project ref if it changes):
 
 ## Phase 2 — Auth + Schema + RLS + Role-Gated Dashboard
 
-### 1. Create an admin user
+> **Bootstrap only:** sections 1–2 are needed exactly once, to create the very first admin. After that, every additional user is created from the in-app **Admin → Users** panel (see Phase 2.5). The client never needs to open Supabase again.
+
+### 1. Create the bootstrap admin user (Supabase Dashboard, one-time)
 
 1. Open the **Auth → Users** page in Supabase Dashboard
 2. Click **Add user → Create new user**
@@ -30,9 +32,7 @@ Useful Supabase Dashboard URLs (replace project ref if it changes):
 
 > The `handle_new_auth_user` trigger automatically creates a matching row in `public.users` with default role `employee`.
 
-### 2. Promote that user to admin
-
-In the **SQL Editor**, run:
+### 2. Promote the bootstrap user to admin (SQL Editor, one-time)
 
 ```sql
 update public.users set role = 'admin'
@@ -41,7 +41,7 @@ where email = 'YOUR_ADMIN_EMAIL@example.com';
 select id, email, role from public.users;
 ```
 
-The user should now appear with `role = admin`.
+The user should now appear with `role = admin`. From here on, use Phase 2.5's admin panel for everything.
 
 ### 3. Test the admin flow
 
@@ -55,26 +55,19 @@ The user should now appear with `role = admin`.
 
 ### 4. Test the employee flow (proves role gating works)
 
-1. Add a second user in the Auth Dashboard, e.g. `employee@test.com` (auto-confirm on)
-2. **Do not promote** — leave default role `employee`
-3. Open an **incognito window** and sign in as that user
-4. ✅ No **Admin** link in nav
-5. ✅ Role badge shows `employee`
-6. Manually visit http://localhost:3000/dashboard/admin
-7. ✅ You should be redirected back to `/dashboard` (proxy.ts blocks non-admins)
+1. **Use the admin panel** to add `employee@test.com` (see Phase 2.5 § 2). Leave role as `Employee`.
+2. Open an **incognito window** and sign in as that user
+3. ✅ No **Admin** link in nav
+4. ✅ Role badge shows `employee`
+5. Manually visit http://localhost:3000/dashboard/admin
+6. ✅ You should be redirected back to `/dashboard` (proxy.ts blocks non-admins)
 
 ### 5. Test the sub-ID flow
 
-1. Add a third user `subid1@test.com` (auto-confirm on)
-2. In SQL Editor:
-   ```sql
-   update public.users
-   set role = 'sub_id', sub_id_range_start = 1, sub_id_range_end = 500
-   where email = 'subid1@test.com';
-   ```
-3. Sign in as that user
-4. ✅ Stripped-down "Bulk Data Entry" screen appears (no main nav, no tiles)
-5. ✅ Assigned range `1 – 500` is shown
+1. **Use the admin panel** to add `subid1@test.com` with role `Sub-ID`, range `1 – 500` (see Phase 2.5 § 2–3)
+2. Sign in as that user
+3. ✅ Stripped-down "Bulk Data Entry" screen appears (no main nav, no tiles)
+4. ✅ Assigned range `1 – 500` is shown
 
 ### 6. Verify the audit log
 
@@ -103,7 +96,7 @@ update public.penalties set amount_paise = 0 where id = '<any-id>';
 
 ## Phase 2.5 — Admin User-Management Panel
 
-> Goal: prove the admin can run the full user lifecycle from inside the app, with no Supabase Dashboard access.
+> Goal: prove the admin can run the full user lifecycle from inside the app, with no Supabase Dashboard access. After the bootstrap admin from Phase 2 § 1–2, every other user (employee, sub-ID, additional admin) is created here.
 
 ### 1. Open the Users page
 1. Sign in as admin → top nav → click **Admin** → click the **Users** tile (or visit `/dashboard/admin/users`)
@@ -114,26 +107,46 @@ update public.penalties set amount_paise = 0 where id = '<any-id>';
 1. Fill: email `employee2@test.com`, password `Test1234!`, role `Employee`
 2. Click **Add user**
 3. ✅ Green "Created employee2@test.com" banner appears, the row shows up below
+4. Sign in as `employee2@test.com` in incognito → ✅ lands on dashboard with `employee` badge, no Admin nav
+5. Negative case: try the form with password `short` → ✅ red banner "Password must be at least 8 characters"
+6. Negative case: submit with email `not-an-email` → ✅ red banner with a validation error
 
 ### 3. Sub-ID role + range
 1. In the row for `employee2@test.com`, change role select to `Sub-ID`, set start `1`, end `500`, click **Save**
 2. ✅ Status row updates, Range column reads `1 – 500`
 3. Sign in as `employee2@test.com` in incognito → ✅ stripped-down "Bulk Data Entry" screen with `Range: 1 – 500`
+4. Negative case: try saving role `Sub-ID` with end `100` and start `500` (or empty range) → ✅ red banner "Sub-ID requires a valid range (start ≤ end)"
 
 ### 4. Disable / Enable
 1. Back as admin → click **Disable** on `employee2@test.com`
 2. ✅ Status badge flips to `Disabled`
 3. In incognito, employee2 attempts sign-in → ✅ redirected back to `/login` (`requireUser` rejects disabled accounts)
-4. Click **Enable** → status goes back to `Active`
+4. Click **Enable** → status goes back to `Active`, employee2 can sign in again
 
 ### 5. Guardrails
 1. Try to change your own role from `admin` to `employee` → ✅ red banner: "You cannot demote yourself"
-2. Try to **Disable** yourself → ✅ button is disabled in the UI
-3. If you're the only admin and try to demote any admin → ✅ red banner: "Cannot demote the only active admin"
+2. ✅ The **Disable** button on your own row is greyed out and unclickable
+3. ✅ The **Delete** button on your own row is greyed out and unclickable
+4. If you're the only admin in the system, try to demote any admin row → ✅ red banner: "Cannot demote the only active admin"
+5. If you're the only admin, try to disable that admin → ✅ red banner: "Cannot disable the only active admin"
 
 ### 6. Delete
-1. Click **Delete** on `employee2@test.com` → row disappears
-2. Supabase Dashboard → Auth → Users → ✅ that user is also gone (auth + public.users cascaded)
+1. Click **Delete** on `employee2@test.com` → row disappears, green "User deleted" banner shows
+2. Supabase Dashboard → **Auth → Users** → ✅ that user is also gone (auth row deleted; the `on delete cascade` removed the `public.users` row too)
+3. SQL Editor: `select * from public.users where email='employee2@test.com';` → ✅ zero rows
+
+### 7. Audit-trail spot check
+After a few admin operations above, in SQL Editor:
+
+```sql
+select user_id, action, table_name, new_value->>'role' as role, at
+from public.audit_log
+where table_name = 'users'
+order by at desc
+limit 10;
+```
+
+✅ Should show INSERT (from `handle_new_auth_user`), UPDATE rows for each role/range/disable change, and DELETE rows for any deletions — all with the admin's `user_id`.
 
 ---
 
