@@ -28,44 +28,92 @@ The build is sliced into **7 phases (one per day)**. Every phase ends with **som
 
 ---
 
-## Phase 1 — Day 1: Project Init + Live Vercel Link
-**Demo:** A live URL with the app's branded login screen + a "coming soon" dashboard skeleton.
+## Phase 1 — Day 1: Project Init + Live Vercel Link ✅ SHIPPED (2026-05-07)
+**Demo URL:** Vercel preview being connected · Repo: `github.com/shubh7shubh/vehical_info`
 
-- Initialize Next.js 14 App Router project as above.
-- Add Tailwind + shadcn/ui base, set up brand theme tokens (two colors reserved for the two banks — placeholder names until Open Question #8 is answered).
-- Build login page UI shell (no backend yet) and a logged-in dashboard skeleton with the 4 quick-access tiles + header strip from PRD §3.1.
-- Push to GitHub (private repo).
-- Connect to Vercel → deploy → share preview URL with client.
-- Wire env vars in Vercel: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`.
+**What shipped:**
+- Next.js 16.2.5 (App Router) + Tailwind v4 + TypeScript scaffolded into repo root
+- Brand tokens for Bank A (blue) / Bank B (green) — names swappable when client confirms (PRD Open Q #8)
+- `/login` UI shell — branded sign-in form, button intentionally disabled (auth wires in Phase 2)
+- `/dashboard` skeleton — header strip with 5 stats slots + 4 quick-access tiles (Pending, Bank Recovery, Daily Summary, Total Customers) per PRD §3.1
+- `lib/supabase/server.ts` + `client.ts` via `@supabase/ssr` — placeholder env wired
+- `middleware.ts` stub (Phase 2 will rename to `proxy.ts` per Next 16 convention and add session refresh + role gating)
+- `CLAUDE.md` with hard architectural rules (no Edge runtime, no Vercel Cron, DB-first business logic, RLS mandatory, soft-delete only)
+- `.env.local.example` with Supabase URL pre-filled, service role + anon + CRON_SECRET placeholders
+- Local `.env.local` populated with real Supabase keys (gitignored)
+- `next build` passes; routes `/`, `/login`, `/dashboard` generated
 
-**Critical files created:**
+**Critical files shipped:**
 - `app/(auth)/login/page.tsx`
-- `app/(dashboard)/layout.tsx`, `app/(dashboard)/page.tsx`
-- `lib/supabase/server.ts`, `lib/supabase/client.ts`
-- `middleware.ts` (stub — will gate in Phase 2)
-- `CLAUDE.md` (see content draft below)
+- `app/dashboard/layout.tsx`, `app/dashboard/page.tsx`
+- `app/page.tsx` (redirects `/` → `/login`)
+- `lib/supabase/server.ts`, `lib/supabase/client.ts`, `lib/utils.ts`
+- `middleware.ts` (stub)
+- `CLAUDE.md`, `.env.local.example`, `docs/`
+
+**Outstanding for Day 1 demo:** Vercel project import + env-var paste (user owns this).
 
 ---
 
-## Phase 2 — Day 2: Auth + Schema + RLS + Role-Gated Dashboard
-**Demo:** Admin and Employee can log in; each sees a role-appropriate dashboard. Sub-ID account opens a restricted entry screen only.
+## Phase 2 — Day 2: Auth + Schema + RLS + Role-Gated Dashboard 🚧 IN PROGRESS (2026-05-07)
+**Demo:** Real admin / employee / sub-ID login with role-appropriate dashboards. Audit log automatically captures every DB write. Forbidden actions fail at the database (RLS), not just the UI.
 
-**Database schema (Supabase SQL Editor):**
-- `users` (id, email, role: `admin|employee|sub_id`, sub_id_range_start, sub_id_range_end, disabled_at)
-- `banks` (id, name, color)
-- `customers` (id, full_name fields, address, mobiles[], aadhaar, bank_id, created_by, created_at, deleted_at)
-- `vehicles` (customer_id, name, rc_no UNIQUE, engine_no_1, engine_no_2, chassis_no)
+### Defaults Applied (until client confirms PRD §8)
+- Penalty default: `per_day` ₹50 (Open Q #2)
+- Grace period default: 2 days (Open Q #7)
+- Bank labels: "Bank A" / "Bank B" (Open Q #8) — overwritable in seed data with no schema change
+
+### Database Schema — `supabase/migrations/20260507120000_schema.sql`
+- `app_role` enum: `admin | employee | sub_id`
+- `users` (id ↔ auth.users, email, role, sub_id_range_start/end, disabled_at)
+- `banks` (id, name, color, created_at)
+- `customers` (id, first_name, middle_name, last_name, address_taluka, address_village, mobiles text[], aadhaar, bank_id, created_by, created_at, updated_at, deleted_at)
+- `vehicles` (customer_id, vehicle_name, rc_no UNIQUE, engine_no_1, engine_no_2, chassis_no)
 - `guarantors` (customer_id, name, mobile, address)
-- `loans` (id, customer_id, principal, emi_amount, tenure_months, due_day, grace_days, penalty_type: `per_day|monthly_fixed`, penalty_rate, status)
-- `payments` (id, loan_id, amount, mode: `cash|online`, utr, paid_at, recorded_by)
-- `penalties` (id, loan_id, period_start, period_end, amount, waived_by, waived_at)
-- `seizures` (id, customer_id, amount, notes, status: `pending|active|resolved`, approved_by)
-- `foreclosures` (id, loan_id, calculated_at, original_interest, bank_charge, final_payable, paid_at, noc_issued_at)
-- `documents_keys` (customer_id, key_status, key_handover_date, doc_status, doc_handover_date, bank_doc_status)
-- `audit_log` (id, user_id, action, table, record_id, old_value jsonb, new_value jsonb, at)
+- `loans` (id, customer_id, principal_paise, emi_paise, tenure_months, due_day, grace_days, penalty_type, penalty_rate_paise, status, started_at, closed_at)
+- `payments` (id, loan_id, amount_paise, mode, utr, paid_at, recorded_by)
+- `penalties` (id, loan_id, period_start, period_end, amount_paise, waived_by, waived_at)
+- `seizures` (id, customer_id, amount_paise, notes, status, created_by, approved_by)
+- `foreclosures` (id, loan_id, calculated_at, original_interest_paise, bank_charge_paise, final_payable_paise, paid_at, noc_issued_at)
+- `documents_keys` (customer_id PK, key_status, key_handover_date, doc_status, doc_handover_date, bank_doc_status)
+- `audit_log` (id, user_id, action, table_name, record_id, old_value jsonb, new_value jsonb, at)
 
-**RLS policies** for each table per role matrix (PRD §5).
-**Auth:** Supabase email/password + OTP via `@supabase/ssr`. Middleware enforces role-based route access server-side.
+All money stored as integer **paise** (avoid float). All FKs use `on delete restrict` — soft-delete is the only delete path.
+
+### RLS Policies — `supabase/migrations/20260507120100_rls.sql`
+Enabled on every table; policies map to PRD §5:
+- Admin → full read/write everywhere
+- Employee → read all (UTR masked via RPC return shape, not RLS); insert customers, vehicles, guarantors, loans, payments; **cannot** edit penalties, foreclosures, seizures (pending state), users
+- Sub-ID → INSERT-only on customers/vehicles/guarantors, scoped to assigned numeric range, blocked when `disabled_at IS NOT NULL`
+
+### Triggers — `supabase/migrations/20260507120200_triggers.sql`
+- `audit_log_trigger()` — fires `AFTER INSERT/UPDATE/DELETE` on every table; captures `auth.uid()`, action, before/after as jsonb
+- `handle_new_auth_user()` — `AFTER INSERT` on `auth.users` → creates matching `public.users` row with default role `employee`
+- `set_updated_at()` — generic timestamp trigger applied to mutable tables
+- `enforce_soft_delete()` pattern — DELETE intercepted, sets `deleted_at` instead
+
+### Seed — `supabase/migrations/20260507120300_seed.sql`
+- Inserts Bank A + Bank B with default colors
+- Includes (commented) snippet to promote first user to admin: `update public.users set role='admin' where email='you@example.com';`
+
+### App Wiring
+- Rename `middleware.ts` → `proxy.ts` (Next 16) with Supabase session refresh + role gates: `/dashboard/admin/*` → admin only, `/dashboard/*` → any authenticated, `/login` → redirect away if already authed
+- Login form converted to server action calling `supabase.auth.signInWithPassword`
+- Logout button in dashboard header
+- `lib/auth/current-user.ts` → `getCurrentUser()` returns `{ user, role, disabled, subIdRange }` from joined `auth.users` + `public.users`
+- Dashboard nav reflects role; `/dashboard/admin` page stub created with placeholder for sub-ID + employee management (built out in Phase 6)
+
+### How to Apply Migrations
+1. Open Supabase Dashboard → SQL Editor
+2. Run each migration file in order: `20260507120000_schema.sql` → `20260507120100_rls.sql` → `20260507120200_triggers.sql` → `20260507120300_seed.sql`
+3. Create first user in **Authentication → Users → Add user** (email + password)
+4. Run the admin-promotion snippet from the seed file with that user's email
+5. Log into `/login` on Vercel preview — should land on admin dashboard
+
+### Demoable Proof
+- Log in as admin → full nav visible (Customers / Pending / Recovery / Summary / Admin)
+- Create a second user, leave role as default `employee` → log in → no Admin nav, RLS blocks any update to penalties via direct REST API
+- Open Supabase SQL Editor → `select * from audit_log` shows rows for every action taken
 
 ---
 

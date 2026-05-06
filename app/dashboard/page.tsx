@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUser } from "@/lib/auth/current-user";
 
 const headerStats = [
   { label: "Today", value: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) },
@@ -35,11 +36,50 @@ const tiles = [
   },
 ];
 
-export default function DashboardHome() {
+export default async function DashboardHome() {
+  const user = await requireUser();
+
+  if (user.role === "sub_id") {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-border bg-background p-6">
+          <h1 className="text-lg font-semibold">Bulk Customer Entry</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Signed in as <strong>{user.email}</strong>. You can add customer
+            records within your assigned range only.
+          </p>
+          {user.subIdRange ? (
+            <p className="mt-3 text-sm">
+              Range: <strong>{user.subIdRange.start}</strong> –{" "}
+              <strong>{user.subIdRange.end}</strong>
+            </p>
+          ) : (
+            <p className="mt-3 text-sm text-warning">
+              No range assigned yet. Ask your admin to assign one before
+              entering records.
+            </p>
+          )}
+        </div>
+        <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+          <strong className="text-foreground">Phase 3</strong> brings the full
+          customer entry form here.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-border bg-background p-4">
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+        <div className="flex items-baseline justify-between">
+          <h1 className="text-lg font-semibold">
+            Welcome, {user.email.split("@")[0]}
+          </h1>
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">
+            {user.role}
+          </span>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-5">
           {headerStats.map((stat) => (
             <div key={stat.label}>
               <div className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -77,10 +117,10 @@ export default function DashboardHome() {
       </section>
 
       <section className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-        <strong className="text-foreground">Phase 1 preview.</strong> This is a
-        UI skeleton. Auth, search, customer cards, penalty engine, and bank
-        recovery lists land in Phases 2–7. See <code>docs/PROJECT_REPORT.md</code>{" "}
-        for the build schedule.
+        <strong className="text-foreground">Phase 2 preview.</strong> Auth,
+        role-gated nav, and full DB schema with RLS are live. Customer
+        management, smart search, and the customer card land in Phase 3 —
+        see <code>docs/PROJECT_REPORT.md</code>.
       </section>
     </div>
   );

@@ -1,10 +1,17 @@
 import Link from "next/link";
+import { loginAction } from "./actions";
 
 export const metadata = {
   title: "Sign in — Vehicle Finance",
 };
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; next?: string }>;
+}) {
+  const { error, next } = await searchParams;
+
   return (
     <div className="flex min-h-screen flex-1 items-center justify-center bg-muted px-4 py-12">
       <div className="w-full max-w-md">
@@ -21,9 +28,11 @@ export default function LoginPage() {
         </div>
 
         <form
+          action={loginAction}
           className="space-y-4 rounded-2xl border border-border bg-background p-6 shadow-sm"
-          action="#"
         >
+          {next ? <input type="hidden" name="next" value={next} /> : null}
+
           <div className="space-y-1.5">
             <label htmlFor="email" className="text-sm font-medium">
               Email
@@ -61,25 +70,24 @@ export default function LoginPage() {
             />
           </div>
 
+          {error ? (
+            <p className="rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">
+              {error === "missing"
+                ? "Email and password are required."
+                : decodeURIComponent(error)}
+            </p>
+          ) : null}
+
           <button
             type="submit"
-            disabled
-            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-            title="Auth wiring lands in Phase 2"
+            className="w-full rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
           >
             Sign in
           </button>
-
-          <p className="text-center text-xs text-muted-foreground">
-            Auth backend lands in Phase 2 ·{" "}
-            <Link href="/dashboard" className="underline hover:text-foreground">
-              Preview dashboard
-            </Link>
-          </p>
         </form>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          v0.1 · Phase 1 preview
+          v0.2 · Phase 2 preview
         </p>
       </div>
     </div>
