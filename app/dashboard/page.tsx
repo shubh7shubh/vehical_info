@@ -60,10 +60,6 @@ export default async function DashboardHome() {
             </p>
           )}
         </div>
-        <div className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-          <strong className="text-foreground">Phase 3</strong> brings the full
-          customer entry form here.
-        </div>
       </div>
     );
   }
@@ -116,12 +112,6 @@ export default async function DashboardHome() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-        <strong className="text-foreground">Phase 2 preview.</strong> Auth,
-        role-gated nav, and full DB schema with RLS are live. Customer
-        management, smart search, and the customer card land in Phase 3 —
-        see <code>docs/PROJECT_REPORT.md</code>.
-      </section>
     </div>
   );
 }

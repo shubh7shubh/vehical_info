@@ -86,9 +86,6 @@ export default async function LoginPage({
           </button>
         </form>
 
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          v0.2 · Phase 2 preview
-        </p>
       </div>
     </div>
   );

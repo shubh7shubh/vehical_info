@@ -79,7 +79,6 @@ export default async function DashboardLayout({
               placeholder="Search name, RC, engine, mobile…"
               className="hidden w-72 rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 md:block"
               disabled
-              title="Smart search wires up in Phase 3"
             />
             <div
               className="flex items-center gap-2 rounded-full border border-border px-2 py-1 text-xs"
@@ -105,9 +104,6 @@ export default async function DashboardLayout({
         {children}
       </main>
 
-      <footer className="border-t border-border py-4 text-center text-xs text-muted-foreground">
-        v0.2 — Phase 2 · Built with Next.js 16 & Supabase
-      </footer>
     </div>
   );
 }

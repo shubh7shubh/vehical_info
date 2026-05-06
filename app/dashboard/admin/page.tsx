@@ -14,15 +14,15 @@ export default async function AdminPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div className="rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">
           <div className="mb-1 font-semibold text-foreground">Sub-IDs</div>
-          Provision and monitor temporary data-entry accounts. Phase 6.
+          Provision and monitor temporary data-entry accounts.
         </div>
         <div className="rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">
           <div className="mb-1 font-semibold text-foreground">Employees</div>
-          Activate, disable, reset access. Phase 6.
+          Activate, disable, reset access.
         </div>
         <div className="rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">
           <div className="mb-1 font-semibold text-foreground">Audit Log</div>
-          Browse every create / update / delete across the system. Phase 6.
+          Browse every create / update / delete across the system.
         </div>
       </div>
     </div>
