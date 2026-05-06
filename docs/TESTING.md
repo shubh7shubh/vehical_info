@@ -101,6 +101,42 @@ update public.penalties set amount_paise = 0 where id = '<any-id>';
 
 ---
 
+## Phase 2.5 — Admin User-Management Panel
+
+> Goal: prove the admin can run the full user lifecycle from inside the app, with no Supabase Dashboard access.
+
+### 1. Open the Users page
+1. Sign in as admin → top nav → click **Admin** → click the **Users** tile (or visit `/dashboard/admin/users`)
+2. ✅ Your own row appears, marked `(you)`, with role `admin` and status `Active`
+3. Visiting the same page as an employee should redirect to `/dashboard` (proxy gate)
+
+### 2. Create a user via the form
+1. Fill: email `employee2@test.com`, password `Test1234!`, role `Employee`
+2. Click **Add user**
+3. ✅ Green "Created employee2@test.com" banner appears, the row shows up below
+
+### 3. Sub-ID role + range
+1. In the row for `employee2@test.com`, change role select to `Sub-ID`, set start `1`, end `500`, click **Save**
+2. ✅ Status row updates, Range column reads `1 – 500`
+3. Sign in as `employee2@test.com` in incognito → ✅ stripped-down "Bulk Data Entry" screen with `Range: 1 – 500`
+
+### 4. Disable / Enable
+1. Back as admin → click **Disable** on `employee2@test.com`
+2. ✅ Status badge flips to `Disabled`
+3. In incognito, employee2 attempts sign-in → ✅ redirected back to `/login` (`requireUser` rejects disabled accounts)
+4. Click **Enable** → status goes back to `Active`
+
+### 5. Guardrails
+1. Try to change your own role from `admin` to `employee` → ✅ red banner: "You cannot demote yourself"
+2. Try to **Disable** yourself → ✅ button is disabled in the UI
+3. If you're the only admin and try to demote any admin → ✅ red banner: "Cannot demote the only active admin"
+
+### 6. Delete
+1. Click **Delete** on `employee2@test.com` → row disappears
+2. Supabase Dashboard → Auth → Users → ✅ that user is also gone (auth + public.users cascaded)
+
+---
+
 ## Phase 3 — Customer Management & Smart Search (planned)
 
 > To be filled in once Phase 3 ships.

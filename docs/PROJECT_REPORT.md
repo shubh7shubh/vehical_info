@@ -117,6 +117,39 @@ Enabled on every table; policies map to PRD §5:
 
 ---
 
+## Phase 2.5 — Admin User-Management Panel 🚧 IN PROGRESS (2026-05-07)
+**Why:** The client doesn't use Supabase — they shouldn't need to open the Supabase Dashboard to add an employee, change a role, or disable an account. This slice pulls the user-management half of Phase 6 forward so the entire admin loop is demoable inside the app.
+
+**Demo:** From the dashboard, an admin can add an employee, change a role, assign a sub-ID range, and disable an account. The newly created user can sign in immediately with no Supabase Dashboard interaction.
+
+### Deliverables
+- `lib/supabase/admin.ts` — service-role Supabase client (server-only)
+- `app/dashboard/admin/users/page.tsx` — users list + "Add user" form
+- `app/dashboard/admin/users/actions.ts` — server actions:
+  - `createUserAction` — Auth Admin API + role/range patch
+  - `setUserRoleAction`
+  - `toggleUserDisabledAction`
+  - `deleteUserAction`
+- `app/dashboard/admin/page.tsx` — tiles wired to real routes
+
+### Guardrails
+- **Last-admin protection:** cannot demote, disable, or delete the only active admin
+- **Self-modification protection:** cannot disable/demote/delete yourself
+- **Service-role key** only used in server-only modules (never imported from client components)
+- Email + password validated server-side via zod (valid email, password ≥ 8 chars)
+
+### Phase 6 scope adjustment
+- ❌ removed (shipped in Phase 2.5): create employee, change role, disable, delete
+- ✅ stays in Phase 6: OTP gating, sub-ID range live progress + auto-disable, audit log viewer, soft-delete recovery UI, documents & key handling
+
+### Demoable Proof
+- Admin → `/dashboard/admin/users` → see all users, add `employee2@test.com` via the form → row appears
+- Change role to `sub_id` with range `1–500`; sign in as that user in incognito → bulk-entry shell with the range visible
+- Toggle disable → that user is blocked at next login
+- Try to demote yourself → action returns an error, role unchanged
+
+---
+
 ## Phase 3 — Day 3: Customer Management + Smart Search + Customer Card
 **Demo:** Add new customer, search by name/RC/engine/mobile/Aadhaar, open full customer card with Customer/Guarantor/Vehicle details.
 
@@ -150,13 +183,15 @@ Enabled on every table; policies map to PRD §5:
 
 ---
 
-## Phase 6 — Day 6: OTP Gating + Sub-IDs + Audit Log + Soft Delete + Docs/Keys
-**Demo:** Admin actions (penalty edit, foreclosure, seizure approval) require email OTP. Sub-ID accounts can only insert within their assigned range. Deleted records show in a recovery view.
+## Phase 6 — Day 6: OTP Gating + Sub-ID Monitoring + Audit Viewer + Soft Delete + Docs/Keys
+**Demo:** Admin actions (penalty edit, foreclosure, seizure approval) require email OTP. Sub-ID range usage is visible live and auto-disables when full. Deleted records show in a recovery view.
+
+> Note: basic user create / role-change / disable / delete shipped in **Phase 2.5**. Phase 6 focuses on the deeper monitoring + safety features below.
 
 - Email OTP flow via Supabase Auth: `/api/auth/otp` issues, RPC verifies token before mutation.
-- `validate_sub_id_range()` trigger on customers insert; auto-disable sub_id account when range filled (RPC `mark_sub_id_complete`).
-- Admin sub-ID management page: create / monitor progress / disable.
-- Audit log trigger wired on every table; admin-only audit log view.
+- `validate_sub_id_range()` trigger hardening (already partial in Phase 2 trigger) + auto-disable when range filled (RPC `mark_sub_id_complete`).
+- Sub-ID **monitoring** page: live progress bar (records entered / range size), spot-check helper, "complete batch" button.
+- Audit log **viewer** UI — paginated table, filter by user / table / action.
 - Soft-delete trigger (sets `deleted_at`); 30-day recovery UI for Admin.
 - Documents & Key handling section editable by Admin, view-only for Employee.
 
