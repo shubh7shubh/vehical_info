@@ -94,3 +94,17 @@ in `public.banks` and `public.loans` without schema change.
 - Login is the entry point; `/` redirects to `/login`.
 - Sub-ID role gets a stripped-down `/dashboard` (no nav, no tiles) — never expose
   the full nav to a sub-ID account.
+- **Loading state on every Server Action.** Use `<SubmitButton>` from
+  `components/submit-button.tsx` (wraps `useFormStatus()`) for any button that
+  submits a server action. Never ship a plain `<button type="submit">` for a
+  server action — clicks feel like the page hung.
+- **Mobile-first responsive — every feature must be fully usable on a phone.**
+  - The app is used in the field on mobile devices, not just desktops.
+  - Test every page at 375px / 414px / 768px before shipping. No nav link, button,
+    table column, or form input may be hidden behind `hidden md:*` without an
+    equivalent mobile affordance (hamburger menu, dropdown, horizontal scroll
+    container, etc.).
+  - Dashboard top-nav must be reachable on mobile. Tables wider than the viewport
+    must scroll horizontally inside their container, never overflow the page.
+  - Form inputs use 16px+ font-size on mobile (otherwise iOS auto-zooms on focus).
+  - Touch targets ≥ 40px tall.

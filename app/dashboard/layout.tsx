@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { LogOut } from "lucide-react";
 import { requireUser } from "@/lib/auth/current-user";
+import { SubmitButton } from "@/components/submit-button";
+import { MobileNav } from "@/components/mobile-nav";
 import { logoutAction } from "../(auth)/login/actions";
 
 const baseNav = [
@@ -10,6 +13,24 @@ const baseNav = [
   { label: "Daily Summary", href: "/dashboard/summary" },
 ];
 
+function BrandMark() {
+  return (
+    <Link href="/dashboard" className="flex items-center gap-2.5">
+      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-accent-foreground text-sm font-bold tracking-tight shadow-sm">
+        VF
+      </div>
+      <div className="flex flex-col leading-tight">
+        <span className="text-sm font-semibold text-header-fg">
+          Vehicle Finance
+        </span>
+        <span className="hidden text-[10px] font-medium uppercase tracking-[0.16em] text-header-fg-muted sm:block">
+          Loan Management
+        </span>
+      </div>
+    </Link>
+  );
+}
+
 export default async function DashboardLayout({
   children,
 }: {
@@ -19,21 +40,21 @@ export default async function DashboardLayout({
 
   if (user.role === "sub_id") {
     return (
-      <div className="flex min-h-screen flex-1 flex-col bg-muted">
-        <header className="border-b border-border bg-background">
+      <div className="flex min-h-screen flex-1 flex-col bg-background">
+        <header className="bg-header-bg text-header-fg">
           <div className="mx-auto flex w-full max-w-3xl items-center justify-between px-4 py-3">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">
-                VF
-              </div>
-              <span className="font-semibold">Bulk Data Entry</span>
-            </div>
-            <div className="flex items-center gap-3 text-sm">
-              <span className="text-muted-foreground">{user.email}</span>
+            <BrandMark />
+            <div className="flex items-center gap-2 text-sm">
+              <span className="hidden text-header-fg-muted sm:inline">
+                {user.email}
+              </span>
               <form action={logoutAction}>
-                <button className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
-                  Sign out
-                </button>
+                <SubmitButton
+                  pendingLabel="Signing out…"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-header-border px-3 py-1.5 text-xs font-medium text-header-fg hover:bg-header-border disabled:opacity-70"
+                >
+                  <LogOut size={14} /> Sign out
+                </SubmitButton>
               </form>
             </div>
           </div>
@@ -51,50 +72,57 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="flex min-h-screen flex-1 flex-col">
-      <header className="sticky top-0 z-20 border-b border-border bg-background/80 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-7xl items-center gap-6 px-4 py-3">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">
-              VF
-            </div>
-            <span className="font-semibold">Vehicle Finance</span>
-          </Link>
+    <div className="flex min-h-screen flex-1 flex-col bg-background">
+      <header className="sticky top-0 z-20 bg-header-bg text-header-fg shadow-sm">
+        <div className="mx-auto flex w-full max-w-7xl items-center gap-4 px-4 py-2.5">
+          <BrandMark />
 
-          <nav className="hidden flex-1 items-center gap-1 md:flex">
+          <nav className="hidden flex-1 items-center gap-0.5 md:flex">
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-header-fg/85 transition hover:bg-header-border hover:text-header-fg"
               >
                 {item.label}
               </Link>
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-3">
-            <input
-              type="search"
-              placeholder="Search name, RC, engine, mobile…"
-              className="hidden w-72 rounded-lg border border-border bg-background px-3 py-1.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 md:block"
-              disabled
-            />
+          <div className="ml-auto flex items-center gap-2">
             <div
-              className="flex items-center gap-2 rounded-full border border-border px-2 py-1 text-xs"
+              className="hidden items-center gap-2 rounded-full border border-header-border px-2.5 py-1 sm:flex"
               title={user.email}
             >
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted font-medium">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-[11px] font-semibold uppercase text-accent-foreground">
                 {(user.email[0] ?? "?").toUpperCase()}
               </span>
-              <span className="hidden text-muted-foreground sm:inline">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-header-fg-muted">
                 {user.role}
               </span>
             </div>
+            <form action={logoutAction} className="hidden md:block">
+              <SubmitButton
+                pendingLabel="Signing out…"
+                className="inline-flex items-center gap-1.5 rounded-md border border-header-border px-3 py-1.5 text-xs font-medium text-header-fg hover:bg-header-border disabled:opacity-70"
+              >
+                <LogOut size={14} /> Sign out
+              </SubmitButton>
+            </form>
+            <MobileNav items={navItems} />
+          </div>
+        </div>
+        {/* Mobile sign-out as a row under header (since logout is a server action, not a link) */}
+        <div className="border-t border-header-border md:hidden">
+          <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-2 text-xs text-header-fg-muted">
+            <span className="truncate">{user.email}</span>
             <form action={logoutAction}>
-              <button className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
-                Sign out
-              </button>
+              <SubmitButton
+                pendingLabel="Signing out…"
+                className="inline-flex items-center gap-1.5 rounded-md border border-header-border px-2.5 py-1 text-xs font-medium text-header-fg hover:bg-header-border disabled:opacity-70"
+              >
+                <LogOut size={12} /> Sign out
+              </SubmitButton>
             </form>
           </div>
         </div>
@@ -103,7 +131,6 @@ export default async function DashboardLayout({
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
         {children}
       </main>
-
     </div>
   );
 }
