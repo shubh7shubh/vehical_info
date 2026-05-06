@@ -14,7 +14,7 @@ A secure, role-based login system with a working **Admin Panel** to manage your 
 
 You should have received from us:
 
-- A **website link** (looks like `https://your-project.vercel.app`)
+- **Website:** https://vehical-info.vercel.app/
 - An **admin email** and **password**
 
 Open the link in **Google Chrome** or **Microsoft Edge** for the smoothest experience. Mobile works too.
@@ -23,7 +23,7 @@ Open the link in **Google Chrome** or **Microsoft Edge** for the smoothest exper
 
 ## Test 1 — Sign in as admin
 
-1. Open the website link
+1. Open https://vehical-info.vercel.app/
 2. You'll automatically land on a sign-in page
 3. Enter the admin email and password we sent you
 4. Click **Sign in**
@@ -68,7 +68,7 @@ This proves you can add staff yourself, without involving us.
 ## Test 4 — Sign in as that employee
 
 1. Open a **new incognito / private browser window** (Chrome: Ctrl+Shift+N · Edge: Ctrl+Shift+N · Safari: Cmd+Shift+N)
-2. Visit the same website link
+2. Visit https://vehical-info.vercel.app/
 3. Sign in with `employee1@test.com` / `Welcome123!`
 
 ✅ **What you should see:**
@@ -78,7 +78,7 @@ This proves you can add staff yourself, without involving us.
 ### Confirm role gating works
 
 1. While logged in as the employee, try typing this URL by hand:
-   `https://your-project.vercel.app/dashboard/admin`
+   `https://vehical-info.vercel.app/dashboard/admin`
 2. ✅ You should be redirected back to the dashboard automatically — employees cannot view admin pages.
 
 3. Sign out from this incognito window.
