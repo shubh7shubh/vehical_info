@@ -234,8 +234,9 @@ invisible even via a direct database query (RLS), not just hidden in the UI.
 
 ---
 
-## Phase 3 — Customer Management + Smart Search + Customer Card 🚧 IN PROGRESS (2026-05-17)
-**Branch:** `phase-3-customers` (first phase built under the feature-branch flow).
+## Phase 3 — Customer Management + Smart Search + Customer Card ✅ SHIPPED (2026-05-17)
+**Built on the `phase-3-customers` feature branch — the first phase under the
+feature-branch flow — and merged to `main`.**
 **Demo:** Inside a branch, add a customer (with vehicle, guarantor and loan),
 search by name / RC / engine / mobile / Aadhaar, and open a full tabbed customer
 card. Everything is branch-scoped — a branch only ever sees its own customers.
@@ -267,6 +268,17 @@ card. Everything is branch-scoped — a branch only ever sees its own customers.
 - `components/customer-search.tsx`
 
 **Open Question #4 (tabs vs sections):** built as tabs — cleaner on mobile.
+
+**UX shipped alongside (cross-cutting):**
+- `loading.tsx` skeletons for every dashboard section — instant feedback on
+  navigation (`components/loading-skeleton.tsx`).
+- Top progress bar on every in-app navigation (`components/top-progress.tsx`,
+  mounted in the root layout).
+
+**Hotfix during this phase:** `getCurrentUser()` embedded `branches(name)`,
+which is ambiguous because `users` and `branches` share two foreign keys —
+it broke sign-in with a redirect loop. Fixed to a plain select + separate
+branch-name lookup.
 
 ---
 
