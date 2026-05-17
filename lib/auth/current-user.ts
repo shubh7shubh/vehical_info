@@ -19,7 +19,6 @@ type ProfileRow = {
   sub_id_range_start: number | null;
   sub_id_range_end: number | null;
   branch_id: string | null;
-  branches: { name: string } | { name: string }[] | null;
 };
 
 export async function getCurrentUser(): Promise<CurrentUser | null> {
@@ -29,10 +28,14 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // Plain-column select only. Do NOT embed `branches` here: there are two FKs
+  // between `users` and `branches` (users.branch_id and branches.created_by),
+  // so a PostgREST embed is ambiguous and fails — which would null out the
+  // profile and log the user out. The branch name is fetched separately below.
   const { data } = await supabase
     .from("users")
     .select(
-      "role, disabled_at, sub_id_range_start, sub_id_range_end, branch_id, branches(name)",
+      "role, disabled_at, sub_id_range_start, sub_id_range_end, branch_id",
     )
     .eq("id", user.id)
     .single();
@@ -40,9 +43,16 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   const profile = data as ProfileRow | null;
   if (!profile) return null;
 
-  const branch = Array.isArray(profile.branches)
-    ? (profile.branches[0] ?? null)
-    : profile.branches;
+  // Branch name is non-critical: a failure here must never block sign-in.
+  let branchName: string | null = null;
+  if (profile.branch_id) {
+    const { data: branch } = await supabase
+      .from("branches")
+      .select("name")
+      .eq("id", profile.branch_id)
+      .maybeSingle();
+    branchName = (branch as { name: string } | null)?.name ?? null;
+  }
 
   return {
     id: user.id,
@@ -54,7 +64,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
         ? { start: profile.sub_id_range_start, end: profile.sub_id_range_end }
         : null,
     branchId: profile.branch_id,
-    branchName: branch?.name ?? null,
+    branchName,
   };
 }
 
