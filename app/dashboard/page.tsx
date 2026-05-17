@@ -8,6 +8,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { requireUser } from "@/lib/auth/current-user";
+import { CustomerSearch } from "@/components/customer-search";
 
 const headerStats = [
   {
@@ -116,6 +117,13 @@ export default async function DashboardHome() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Find a customer
+        </h2>
+        <CustomerSearch />
       </section>
 
       <section>

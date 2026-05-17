@@ -103,8 +103,8 @@ in `public.banks` and `public.loans` without schema change.
 - [x] **Phase 1** — Project init + Vercel link + UI skeleton
 - [x] **Phase 2** — Auth + DB schema + RLS + role-gated dashboard
 - [x] **Phase 2.5** — Admin user-management panel (lifted user CRUD out of Phase 6)
-- [ ] **Phase 2.7** — Multi-branch foundation (owner role, branches, branch-scoped RLS)
-- [ ] **Phase 3** — Customer mgmt + smart search + customer card (branch-scoped)
+- [x] **Phase 2.7** — Multi-branch foundation (owner role, branches, branch-scoped RLS)
+- [x] **Phase 3** — Customer mgmt + smart search + customer card (branch-scoped)
 - [ ] **Phase 4** — Payments + auto penalty + pending list
 - [ ] **Phase 5** — Bank recovery + daily summary + foreclosure + seizure
 - [ ] **Phase 6** — OTP gating + sub-ID monitoring + audit log viewer + soft-delete recovery + docs/keys

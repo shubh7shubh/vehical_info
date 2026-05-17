@@ -234,14 +234,39 @@ invisible even via a direct database query (RLS), not just hidden in the UI.
 
 ---
 
-## Phase 3 — Day 3: Customer Management + Smart Search + Customer Card
-**Demo:** Add new customer, search by name/RC/engine/mobile/Aadhaar, open full customer card with Customer/Guarantor/Vehicle details.
+## Phase 3 — Customer Management + Smart Search + Customer Card 🚧 IN PROGRESS (2026-05-17)
+**Branch:** `phase-3-customers` (first phase built under the feature-branch flow).
+**Demo:** Inside a branch, add a customer (with vehicle, guarantor and loan),
+search by name / RC / engine / mobile / Aadhaar, and open a full tabbed customer
+card. Everything is branch-scoped — a branch only ever sees its own customers.
 
-- Onboarding form (server action) with validation + duplicate detection on RC + engine number.
-- Smart search bar in dashboard header → calls `search_customers(query)` RPC (uses Postgres trigram + ILIKE).
-- Disambiguation list when name collides (PRD AC-03).
-- Customer card page: Customer / Guarantor / Vehicle / Loan summary / EMI history / Foreclosure-Seizure status / Docs-Keys section. Use **tabs** (mobile-friendly — pending Open Question #4).
-- "Record incomplete" warning badge when engine_no fields are missing.
+**What shipped:**
+- **`create_customer(p jsonb)` RPC** — single transactional onboarding: writes
+  customer + vehicle + guarantor + loan in one call; a partial failure rolls
+  back. Global duplicate detection on RC number and engine number with friendly
+  errors. Stamps the caller's branch on every row.
+- **`search_customers(q text)` RPC** — security-invoker, so branch-scoped RLS
+  applies automatically. Matches partial name, RC, engine, chassis, Aadhaar, or
+  any mobile.
+- **`/dashboard/customers`** — branch customer list (50 most recent) + the smart
+  search surface; `?q=` runs the RPC. Multiple matches show a disambiguation
+  hint (village + mobile) per PRD AC-03.
+- **`/dashboard/customers/new`** — full onboarding form (Customer / Vehicle /
+  Guarantor / Loan sections), zod-validated, mobile-first 16px inputs.
+- **`/dashboard/customers/[id]`** — tabbed customer card (Customer / Vehicle /
+  Guarantor / Loan / EMI History / Foreclosure-Seizure / Documents & Keys).
+  URL-based tabs (`?tab=`), no client JS, mobile-scrollable. EMI / status / docs
+  tabs show honest empty states until Phases 4–6 fill them.
+- **"Record incomplete" badge** on the list and card when engine numbers are
+  missing.
+- Smart-search bar added to the dashboard home (`components/customer-search.tsx`).
+
+**Critical files:**
+- `supabase/migrations/20260517093000_customer_rpcs.sql`
+- `app/dashboard/customers/{page,new/page,new/actions,[id]/page}.tsx`
+- `components/customer-search.tsx`
+
+**Open Question #4 (tabs vs sections):** built as tabs — cleaner on mobile.
 
 ---
 

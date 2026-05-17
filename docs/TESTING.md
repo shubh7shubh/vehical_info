@@ -253,16 +253,71 @@ are attributable to the owner's `user_id`.
 
 ---
 
-## Phase 3 — Customer Management & Smart Search (planned)
+## Phase 3 — Customer Management & Smart Search
 
-> To be filled in once Phase 3 ships.
+> Goal: prove a branch can onboard customers, find them by any identifier, and
+> open a complete customer card — all scoped to the signed-in user's branch.
 
-Expected checks:
-- Onboard a customer with full details → row appears in `public.customers`
-- Onboarding form rejects duplicate RC number / engine number
-- Smart search returns results by partial name, RC, engine no, mobile, Aadhaar
-- Customer card shows Customer / Guarantor / Vehicle / Loan summary tabs
-- "Record incomplete" badge visible when engine number missing
+### 0. Apply the migration
+
+`npx supabase db push` — applies `20260517093000_customer_rpcs.sql` (the
+`create_customer` and `search_customers` functions). It is additive — no table
+or RLS changes.
+
+### 1. Onboard a customer
+
+1. Sign in as a branch admin or employee → top nav **Customers** → **Add
+   customer** (or visit `/dashboard/customers/new`).
+2. Fill at least: first name, a bank, loan amount, EMI, tenure, due day, start
+   date. Add vehicle + guarantor details too. Click **Save customer**.
+3. ✅ Redirects to the new customer's card showing the entered details.
+4. SQL Editor check — one call wrote four rows:
+
+   ```sql
+   select c.first_name, v.rc_no, g.name, l.principal_paise
+   from public.customers c
+   left join public.vehicles v on v.customer_id = c.id
+   left join public.guarantors g on g.customer_id = c.id
+   left join public.loans l on l.customer_id = c.id
+   order by c.created_at desc limit 1;
+   ```
+
+5. Negative — duplicate: add another customer reusing the same **RC number** →
+   ✅ red banner "A vehicle with RC number … already exists" and **nothing** is
+   saved (transactional rollback — no orphan customer row).
+6. Negative — leave engine numbers blank → ✅ customer saves, and both the list
+   and card show a **Record incomplete — engine details missing** badge.
+
+### 2. Smart search
+
+On `/dashboard/customers` (or the search bar on the dashboard home), search by
+each of these and confirm the customer is found:
+
+- ✅ Partial first name / surname
+- ✅ RC number
+- ✅ Engine number
+- ✅ Mobile number
+- ✅ Aadhaar / ID
+
+When two customers share a name, ✅ both appear with a disambiguation hint
+(village + mobile) — PRD AC-03.
+
+### 3. Customer card
+
+1. Open any customer → ✅ tab strip: Customer / Vehicle / Guarantor / Loan /
+   EMI History / Foreclosure-Seizure / Documents & Keys.
+2. ✅ Customer / Vehicle / Guarantor / Loan tabs show the saved data. Loan tab
+   shows amount, EMI, tenure, due day, grace, penalty config.
+3. ✅ EMI / Foreclosure-Seizure / Documents tabs show empty states (filled in
+   by Phases 4–6).
+4. ✅ On a phone the tab strip scrolls horizontally; no content is cut off.
+
+### 4. Branch isolation
+
+1. As the **Pune** admin, add customer "Test Pune".
+2. Sign in as the **Mumbai** admin → search "Test Pune" → ✅ no result.
+3. Try opening the Pune customer's card URL (`/dashboard/customers/<id>`) as the
+   Mumbai admin → ✅ "not found" — RLS blocks the cross-branch read.
 
 ---
 
