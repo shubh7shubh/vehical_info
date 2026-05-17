@@ -14,8 +14,14 @@ export default async function AdminPage() {
           </span>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Signed in as <strong className="text-foreground">{user.email}</strong>.
-          This area is restricted to admins.
+          Signed in as <strong className="text-foreground">{user.email}</strong>
+          {user.branchName ? (
+            <>
+              {" "}
+              · <strong className="text-foreground">{user.branchName}</strong>
+            </>
+          ) : null}
+          . This area is restricted to admins and scoped to your branch.
         </p>
       </div>
 

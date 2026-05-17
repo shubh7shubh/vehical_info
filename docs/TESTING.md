@@ -150,6 +150,109 @@ limit 10;
 
 ---
 
+## Phase 2.7 — Multi-Branch Foundation
+
+> Goal: prove the company is split into isolated branches, that the single
+> `owner` oversees them all, and that a branch admin/employee can only ever see
+> their own branch — enforced at the database (RLS), not just the UI.
+
+### 0. Apply the migration
+
+1. `npx supabase db push` — the 6 branch migrations + the owner-stats RPC apply
+   in filename order. Watch for errors; the order matters (enum → table →
+   columns → backfill → RLS → triggers).
+2. In SQL Editor, sanity-check the backfill:
+
+   ```sql
+   select role, count(*) from public.users group by role;            -- exactly one 'owner'
+   select count(*) from public.customers where branch_id is null;    -- 0
+   select name, code from public.branches;                           -- 'Main Branch' / 'MAIN'
+   ```
+
+### 1. Bootstrap the owner
+
+- If a Phase 2 bootstrap admin already existed, the migration **already promoted**
+  the oldest admin to `owner` — skip ahead.
+- On a clean install with no prior admin:
+  `node scripts/create-owner.mjs owner@test.com Test1234!`
+  ✅ Prints "is now the owner". Running it a second time ✅ refuses ("An owner
+  already exists").
+
+### 2. Owner dashboard
+
+1. Sign in as the owner → ✅ lands on `/dashboard/owner` (not `/dashboard`).
+2. ✅ Header nav shows only **Dashboard** and **Branches**; role badge `owner`.
+3. ✅ "Owner Overview" with summary tiles (Branches / Customers / Active loans /
+   Staff). With no branches yet it shows a "Create your first branch" prompt.
+
+### 3. Create branches
+
+1. Go to **Branches** → fill the "Create branch" form: name `Pune Branch`, code
+   `PUN`, city `Pune`, admin email `pune.admin@test.com`, password `Test1234!`.
+   Click **Create branch**.
+2. ✅ Green banner; a Pune Branch card appears listing `pune.admin@test.com`
+   under Admins.
+3. Repeat for `Mumbai Branch` / `MUM` with admin `mumbai.admin@test.com`.
+4. Negative case: submit with admin password `short` → ✅ red banner "Admin
+   password must be at least 8 characters".
+
+### 4. Branch isolation
+
+1. Incognito → sign in as `pune.admin@test.com`.
+2. ✅ Dashboard shows the **Pune Branch** chip; nav has **Admin** but no owner
+   links. Visiting `/dashboard/owner` ✅ redirects to `/dashboard`.
+3. **Admin → Users** → ✅ lists only Pune staff (the Pune admin). Add
+   `pune.emp@test.com` as Employee → ✅ created in Pune.
+4. Incognito → sign in as `mumbai.admin@test.com` → **Admin → Users** → ✅
+   `pune.admin@test.com` and `pune.emp@test.com` are **not** listed.
+5. RLS proof — in SQL Editor with the Mumbai admin's session, try to read a Pune
+   row directly:
+
+   ```sql
+   select * from public.users where email = 'pune.emp@test.com';   -- 0 rows
+   ```
+
+   ✅ Zero rows — isolation holds at the database, not just the UI.
+
+### 5. Owner drill-down is read-only
+
+1. As owner → `/dashboard/owner` → click the **Pune Branch** card.
+2. ✅ Branch detail shows stat tiles, the staff list, and recent activity.
+3. ✅ The owner has no controls to edit branch data here — drill-down is
+   read-only. (DB check: the owner has only `*_owner_read` SELECT policies on
+   operational tables.)
+
+### 6. Per-branch last-admin guardrail
+
+1. As the Pune admin (the only admin in Pune), on your own row try to demote
+   yourself → ✅ "You cannot demote yourself"; Disable/Delete greyed out.
+2. As owner → **Branches** → on Pune Branch use **Add admin** to add
+   `pune.admin2@test.com`.
+3. Now back as a Pune admin, demoting/disabling the first Pune admin ✅ succeeds
+   — the guardrail only blocks removing the *last* admin **of that branch**.
+
+### 7. Archive a branch
+
+1. As owner → **Branches** → click **Archive** on a test branch → ✅ card shows
+   the **Archived** badge; **Restore** brings it back.
+
+### 8. Audit trail
+
+In SQL Editor:
+
+```sql
+select table_name, action, branch_id, at
+from public.audit_log
+order by at desc
+limit 20;
+```
+
+✅ Branch/customer/user rows carry a `branch_id`; the `branches` INSERT rows
+themselves may have `branch_id` set to the branch's own id. Owner-level events
+are attributable to the owner's `user_id`.
+
+---
+
 ## Phase 3 — Customer Management & Smart Search (planned)
 
 > To be filled in once Phase 3 ships.

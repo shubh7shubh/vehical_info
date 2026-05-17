@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   AlertCircle,
   Banknote,
@@ -55,6 +56,10 @@ const tiles = [
 
 export default async function DashboardHome() {
   const user = await requireUser();
+
+  if (user.role === "owner") {
+    redirect("/dashboard/owner");
+  }
 
   if (user.role === "sub_id") {
     return (

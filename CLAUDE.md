@@ -28,28 +28,49 @@ test walkthrough), `docs/CLIENT_TESTING.md` (client-facing test plan).
   or server components. `lib/supabase/admin.ts` includes `import "server-only"` to enforce this.
 
 ## Roles
-- `admin` — full access, sees full UTR, manages users + sub-IDs, approves OTP-gated actions
+- `owner` — single global super-admin; oversees every branch; `branch_id` is NULL;
+  read-only drill-down into any branch; the only role that creates/manages branches
+- `admin` — full access **within one branch**, sees full UTR, manages that branch's
+  users + sub-IDs, approves OTP-gated actions
 - `employee` — add customers, log payments, view (UTR masked), no penalty edits, can create
-  seizures in `pending` state (admin approves)
-- `sub_id` — temporary, INSERT-only, scoped to assigned record-range, auto-disabled when
-  range is exhausted; sees a stripped-down "Bulk Data Entry" UI only
+  seizures in `pending` state (admin approves) — all **scoped to their branch**
+- `sub_id` — temporary, INSERT-only, scoped to assigned record-range **within a branch**,
+  auto-disabled when range is exhausted; sees a stripped-down "Bulk Data Entry" UI only
+
+> `admin`, `employee`, `sub_id` each belong to exactly one branch (`users.branch_id`).
+> `owner` belongs to none. See `## Branches` below.
+
+## Branches
+One company, many branches (Phase 2.7). There is no "companies" table — the company
+is implicit, represented by the `owner`.
+- `public.branches` is the tenant unit; every operational table carries a
+  `branch_id` (NOT NULL) and is RLS-scoped to it. `banks` is the exception —
+  it stays **company-wide / global**, no `branch_id`.
+- An `admin`/`employee`/`sub_id` only ever sees their own branch's rows; the `owner`
+  reads every branch but cannot write operational data (read-only at the DB layer).
+- **Every new Phase 3+ table MUST:** (1) have `branch_id uuid not null references
+  branches(id)`, (2) register a `<table>_set_branch_id` before-insert trigger,
+  (3) add a `<table>_branch_idx` index, (4) ship branch-scoped RLS plus a
+  `<table>_owner_read` select policy. RLS helpers: `is_owner()`, `current_branch_id()`.
 
 ## Folder Layout
 - `app/(auth)/login/page.tsx` + `actions.ts` — login form + `loginAction` / `logoutAction`
 - `app/dashboard/*` — admin/employee dashboard (proxy-gated)
 - `app/dashboard/admin/*` — admin-only routes (proxy-gated by role)
-- `app/dashboard/admin/users/{page,actions}.tsx` — user management panel (Phase 2.5)
+- `app/dashboard/admin/users/{page,actions}.tsx` — branch-scoped user management (Phase 2.5/2.7)
+- `app/dashboard/owner/*` — owner-only area (proxy-gated): cross-branch stats,
+  `owner/branches/{page,actions}.tsx` branch CRUD, `owner/branches/[branchId]` drill-down
 - `app/api/*` — thin route handlers (Node runtime) — added in Phases 4–7
 - `lib/supabase/server.ts` — `createSupabaseServerClient()` (anon, cookie-aware via `@supabase/ssr`)
 - `lib/supabase/client.ts` — browser client
 - `lib/supabase/admin.ts` — **service-role** client (`"server-only"`); use only inside
   server actions / server components for admin-tier operations
-- `lib/auth/current-user.ts` — `getCurrentUser()`, `requireUser()`, `requireAdmin()`
+- `lib/auth/current-user.ts` — `getCurrentUser()`, `requireUser()`, `requireAdmin()`, `requireOwner()`
 - `lib/utils.ts` — `cn()`, `formatINR()`, `maskUTR()`
 - `proxy.ts` — Next 16 proxy (replaces `middleware.ts`); session refresh + role gating
 - `supabase/migrations/YYYYMMDDHHMMSS_*.sql` — schema, RLS, triggers, RPCs (source of truth)
 - `supabase/config.toml` — `supabase init` config; lets us run `npx supabase db push`
-- `scripts/create-admin.mjs` — one-shot bootstrap admin provisioner via service role key
+- `scripts/create-owner.mjs` — one-shot bootstrap owner provisioner via service role key
 - `docs/` — PRD, SystemDesign, PROJECT_REPORT, TESTING, CLIENT_TESTING
 
 ## Conventions
@@ -82,7 +103,8 @@ in `public.banks` and `public.loans` without schema change.
 - [x] **Phase 1** — Project init + Vercel link + UI skeleton
 - [x] **Phase 2** — Auth + DB schema + RLS + role-gated dashboard
 - [x] **Phase 2.5** — Admin user-management panel (lifted user CRUD out of Phase 6)
-- [ ] **Phase 3** — Customer mgmt + smart search + customer card
+- [ ] **Phase 2.7** — Multi-branch foundation (owner role, branches, branch-scoped RLS)
+- [ ] **Phase 3** — Customer mgmt + smart search + customer card (branch-scoped)
 - [ ] **Phase 4** — Payments + auto penalty + pending list
 - [ ] **Phase 5** — Bank recovery + daily summary + foreclosure + seizure
 - [ ] **Phase 6** — OTP gating + sub-ID monitoring + audit log viewer + soft-delete recovery + docs/keys
@@ -94,6 +116,8 @@ in `public.banks` and `public.loans` without schema change.
 - Login is the entry point; `/` redirects to `/login`.
 - Sub-ID role gets a stripped-down `/dashboard` (no nav, no tiles) — never expose
   the full nav to a sub-ID account.
+- Owner role lands on `/dashboard/owner` (cross-branch) with its own nav
+  (Dashboard, Branches) — never the operational branch nav.
 - **Loading state on every Server Action.** Use `<SubmitButton>` from
   `components/submit-button.tsx` (wraps `useFormStatus()`) for any button that
   submits a server action. Never ship a plain `<button type="submit">` for a

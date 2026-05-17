@@ -27,30 +27,40 @@ function flash(kind: "error" | "ok", msg: string) {
   redirect(`${USERS_PATH}?${kind}=${encodeURIComponent(msg)}`);
 }
 
-async function activeAdminCount(): Promise<number> {
+/** Count of active admins in a single branch. */
+async function activeAdminCount(branchId: string): Promise<number> {
   const admin = createSupabaseAdminClient();
   const { count, error } = await admin
     .from("users")
     .select("id", { count: "exact", head: true })
     .eq("role", "admin")
+    .eq("branch_id", branchId)
     .is("disabled_at", null);
   if (error) throw error;
   return count ?? 0;
 }
 
+/** True when this user is the last active admin of their branch. */
 async function isLastActiveAdmin(userId: string): Promise<boolean> {
   const admin = createSupabaseAdminClient();
   const { data: target } = await admin
     .from("users")
-    .select("role, disabled_at")
+    .select("role, disabled_at, branch_id")
     .eq("id", userId)
     .single();
-  if (!target || target.role !== "admin" || target.disabled_at) return false;
-  return (await activeAdminCount()) <= 1;
+  if (
+    !target ||
+    target.role !== "admin" ||
+    target.disabled_at ||
+    !target.branch_id
+  ) {
+    return false;
+  }
+  return (await activeAdminCount(target.branch_id)) <= 1;
 }
 
 export async function createUserAction(formData: FormData) {
-  await requireAdmin();
+  const me = await requireAdmin();
 
   const parsed = createUserSchema.safeParse({
     email: formData.get("email"),
@@ -82,12 +92,13 @@ export async function createUserAction(formData: FormData) {
     flash("error", createErr?.message ?? "Failed to create auth user");
   }
 
-  // handle_new_auth_user trigger creates public.users with role=employee.
-  // Patch role/range to requested values.
+  // handle_new_auth_user trigger creates public.users with role=employee on the
+  // Main Branch. Patch role/range and move the user into the admin's branch.
   const { error: updErr } = await admin
     .from("users")
     .update({
       role,
+      branch_id: me.branchId,
       sub_id_range_start: role === "sub_id" ? rangeStart : null,
       sub_id_range_end: role === "sub_id" ? rangeEnd : null,
     })

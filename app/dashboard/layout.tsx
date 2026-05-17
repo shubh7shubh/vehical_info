@@ -13,9 +13,14 @@ const baseNav = [
   { label: "Daily Summary", href: "/dashboard/summary" },
 ];
 
-function BrandMark() {
+const ownerNav = [
+  { label: "Dashboard", href: "/dashboard/owner" },
+  { label: "Branches", href: "/dashboard/owner/branches" },
+];
+
+function BrandMark({ href = "/dashboard" }: { href?: string }) {
   return (
-    <Link href="/dashboard" className="flex items-center gap-2.5">
+    <Link href={href} className="flex items-center gap-2.5">
       <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-accent-foreground text-sm font-bold tracking-tight shadow-sm">
         VF
       </div>
@@ -66,16 +71,19 @@ export default async function DashboardLayout({
     );
   }
 
-  const navItems = [...baseNav];
-  if (user.role === "admin") {
-    navItems.push({ label: "Admin", href: "/dashboard/admin" });
-  }
+  const isOwner = user.role === "owner";
+  const navItems = isOwner
+    ? [...ownerNav]
+    : user.role === "admin"
+      ? [...baseNav, { label: "Admin", href: "/dashboard/admin" }]
+      : [...baseNav];
+  const brandHref = isOwner ? "/dashboard/owner" : "/dashboard";
 
   return (
     <div className="flex min-h-screen flex-1 flex-col bg-background">
       <header className="sticky top-0 z-20 bg-header-bg text-header-fg shadow-sm">
         <div className="mx-auto flex w-full max-w-7xl items-center gap-4 px-4 py-2.5">
-          <BrandMark />
+          <BrandMark href={brandHref} />
 
           <nav className="hidden flex-1 items-center gap-0.5 md:flex">
             {navItems.map((item) => (
@@ -90,6 +98,11 @@ export default async function DashboardLayout({
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            {!isOwner && user.branchName ? (
+              <span className="hidden rounded-full bg-accent-soft px-2.5 py-1 text-[11px] font-semibold text-accent sm:inline">
+                {user.branchName}
+              </span>
+            ) : null}
             <div
               className="hidden items-center gap-2 rounded-full border border-header-border px-2.5 py-1 sm:flex"
               title={user.email}
@@ -115,7 +128,10 @@ export default async function DashboardLayout({
         {/* Mobile sign-out as a row under header (since logout is a server action, not a link) */}
         <div className="border-t border-header-border md:hidden">
           <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-2 text-xs text-header-fg-muted">
-            <span className="truncate">{user.email}</span>
+            <span className="truncate">
+              {user.email}
+              {!isOwner && user.branchName ? ` · ${user.branchName}` : ""}
+            </span>
             <form action={logoutAction}>
               <SubmitButton
                 pendingLabel="Signing out…"

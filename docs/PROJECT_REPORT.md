@@ -150,6 +150,90 @@ Enabled on every table; policies map to PRD §5:
 
 ---
 
+## Phase 2.7 — Multi-Branch Foundation 🚧 IN PROGRESS (2026-05-17)
+**Why:** Client review changed the model. The business is **one company with
+multiple physical branches**, not a single flat office. Each branch must run as
+its own isolated unit — its own admin, staff, customers and loans — *separated
+for visibility and security*. A new single top-level **owner** account oversees
+every branch. This is foundational: it lands before Phase 3 so every later table
+is branch-scoped from creation (same precedent as Phase 2.5 being lifted out of
+Phase 6).
+
+**Demo:** The owner logs into a cross-branch dashboard with live per-branch
+stats, creates branches each with their own admin, and drills read-only into any
+branch. A branch admin/employee sees only their own branch — a second branch is
+invisible even via a direct database query (RLS), not just hidden in the UI.
+
+### Model decided with the client
+- One implicit company; a new `branches` table is the tenant unit (no
+  "companies" table).
+- `owner` — single global super-admin, `branch_id` NULL, sees all branches. The
+  existing bootstrap admin is promoted to owner by the migration.
+- Each branch is created with one admin; **more admins can be added later** —
+  the last-admin guardrail is now per-branch.
+- `banks` stays **company-wide / global** (shared Bank A / Bank B list). Recovery
+  lists still come out per-branch because they derive from each branch's
+  customers.
+- Owner can: see aggregate stats, create/manage branches + their admins, and
+  drill read-only into any branch's data.
+
+### Database — `supabase/migrations/2026051709xxxx_*.sql` (6 files + RPC)
+- `..._add_owner_role.sql` — `owner` added to the `app_role` enum (its own file —
+  Postgres forbids using a freshly-added enum value in the same transaction).
+- `..._branches_table.sql` — `public.branches` (name, code, city, soft-delete).
+- `..._branch_id_columns.sql` — nullable `branch_id` + index on `users` and all 9
+  operational tables + `audit_log`. `banks` deliberately excluded.
+- `..._branch_backfill.sql` — seeds the **Main Branch**, backfills every existing
+  row into it, promotes the oldest admin to `owner`, sets `branch_id` NOT NULL on
+  operational tables, and adds the `users` CHECK (`role='owner' OR branch_id IS
+  NOT NULL`).
+- `..._rls_branch_scoped.sql` — `is_owner()` + `current_branch_id()` helpers;
+  every operational policy gains `and branch_id = current_branch_id()`; one
+  `*_owner_read` SELECT-only policy per table (owner read-only at the DB layer).
+- `..._triggers_branch.sql` — `set_branch_id()` stamps `branch_id` on insert
+  (from the user, or the parent row for child tables); `handle_new_auth_user`
+  defaults new users to Main Branch; `audit_log_trigger` records `branch_id`;
+  `enforce_sub_id_range` counts within the branch.
+- `..._owner_stats_rpc.sql` — `owner_branch_stats()` security-definer RPC powering
+  the owner dashboard.
+
+### App wiring
+- `lib/auth/current-user.ts` — `AppRole` gains `owner`; `CurrentUser` gains
+  `branchId` / `branchName`; new `requireOwner()`.
+- `proxy.ts` — gates `/dashboard/owner` to the owner; post-login landing routes
+  owner → `/dashboard/owner`, everyone else → `/dashboard`.
+- `app/dashboard/owner/*` — owner dashboard (per-branch stat cards),
+  `owner/branches` (list + create-branch-with-admin + add-admin + archive),
+  `owner/branches/[branchId]` (read-only drill-down).
+- `app/dashboard/admin/users/*` — user list scoped to the admin's branch; created
+  users join that branch; per-branch last-admin guardrail.
+- `scripts/create-owner.mjs` — replaces `create-admin.mjs`; provisions the single
+  owner, refuses if one already exists.
+
+### Guardrails
+- Owner has **no write policy** on operational tables — drill-down is read-only,
+  enforced by RLS.
+- An admin can never mint an `owner` (UI omits it; `users_admin_write` has
+  `with check (role <> 'owner')`).
+- Cross-branch reads/writes blocked by `branch_id = current_branch_id()` in every
+  policy; `current_branch_id()` is NULL for the owner so owner matches only the
+  `is_owner()` policies.
+- Last active admin of a branch cannot be demoted/disabled/deleted.
+
+### How to Apply
+1. `npx supabase db push` — applies the 6 + 1 migration files in order.
+2. If no prior admin existed, run `node scripts/create-owner.mjs <email> <pwd>`.
+3. Phases 3–7 are now **branch-scoped** — see the table checklist in `CLAUDE.md`.
+
+### Demoable Proof
+- Owner logs in → `/dashboard/owner` with branch stat cards.
+- Owner creates "Pune Branch" + "Mumbai Branch", each with its own admin.
+- Pune admin signs in → sees only Pune; `/dashboard/owner` redirects away.
+- A customer added under Pune is invisible to the Mumbai admin — confirmed by a
+  direct `select` returning zero rows in the Supabase SQL Editor.
+
+---
+
 ## Phase 3 — Day 3: Customer Management + Smart Search + Customer Card
 **Demo:** Add new customer, search by name/RC/engine/mobile/Aadhaar, open full customer card with Customer/Guarantor/Vehicle details.
 

@@ -13,7 +13,10 @@ export async function loginAction(formData: FormData) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
   if (error) {
     redirect(
@@ -21,7 +24,19 @@ export async function loginAction(formData: FormData) {
     );
   }
 
-  redirect(next || "/dashboard");
+  // When no explicit deep-link was requested, send the owner to their own
+  // cross-branch dashboard instead of the branch dashboard.
+  let target = next || "/dashboard";
+  if (target === "/dashboard" && data.user) {
+    const { data: profile } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", data.user.id)
+      .single();
+    if (profile?.role === "owner") target = "/dashboard/owner";
+  }
+
+  redirect(target);
 }
 
 export async function logoutAction() {

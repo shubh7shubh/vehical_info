@@ -12,7 +12,7 @@ import {
 type UserRow = {
   id: string;
   email: string;
-  role: "admin" | "employee" | "sub_id";
+  role: "owner" | "admin" | "employee" | "sub_id";
   disabled_at: string | null;
   sub_id_range_start: number | null;
   sub_id_range_end: number | null;
@@ -20,12 +20,14 @@ type UserRow = {
 };
 
 const roleLabel: Record<UserRow["role"], string> = {
+  owner: "Owner",
   admin: "Admin",
   employee: "Employee",
   sub_id: "Sub-ID",
 };
 
 const roleBadge: Record<UserRow["role"], string> = {
+  owner: "bg-accent-soft text-accent",
   admin: "bg-accent-soft text-accent",
   employee: "bg-bank-a-soft text-bank-a",
   sub_id: "bg-warning-soft text-warning",
@@ -45,6 +47,7 @@ export default async function UsersPage({
     .select(
       "id, email, role, disabled_at, sub_id_range_start, sub_id_range_end, created_at",
     )
+    .eq("branch_id", me.branchId)
     .order("created_at", { ascending: false })
     .returns<UserRow[]>();
 
@@ -53,8 +56,12 @@ export default async function UsersPage({
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Users</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Add staff and assign roles. Sub-IDs are temporary accounts limited
-          to a customer-record range.
+          Staff for{" "}
+          <strong className="text-foreground">
+            {me.branchName ?? "your branch"}
+          </strong>
+          . Sub-IDs are temporary accounts limited to a customer-record range.
+          New users join this branch automatically.
         </p>
       </div>
 
