@@ -1,12 +1,36 @@
 # Vehicle Finance — Client Testing Guide
 
-Welcome! This document walks you through everything you can test in the system **right now**. You don't need any technical background — just an internet browser.
+Welcome! This guide walks you through everything you can test in the system
+**right now**. You don't need any technical background — just an internet
+browser.
 
 ---
 
 ## What you have today
 
-A secure, role-based login system with a working **Admin Panel** to manage your staff. Customer onboarding, payments, penalty tracking, and reports are coming in the next few days.
+The system is now organised around **branches**. Here's the simple picture:
+
+- **You are the Owner.** You sit at the top. You can create branches, give each
+  branch its own manager, and see how every branch is doing — all from one
+  screen.
+- **Each branch has its own Admin.** A branch Admin runs only their own branch:
+  they add their own staff and manage their own records.
+- **Each branch is private.** One branch cannot see another branch's people or
+  records. This keeps every branch's information separate and secure.
+
+Customer onboarding, payments, penalty tracking and reports are coming in the
+next few days. For now you can fully test branches, owners, admins and staff.
+
+---
+
+## A quick note on roles
+
+| Role | Who it is | What they can do |
+|---|---|---|
+| **Owner** | You | Create and manage branches; see every branch's totals; look inside any branch |
+| **Admin** | A branch manager | Run one branch — add that branch's staff, manage roles |
+| **Employee** | Branch staff | Day-to-day work inside one branch |
+| **Sub-ID** | A temporary data-entry account | Bulk-enter old record books, limited to a fixed range of records |
 
 ---
 
@@ -15,167 +39,184 @@ A secure, role-based login system with a working **Admin Panel** to manage your 
 You should have received from us:
 
 - **Website:** https://vehical-info.vercel.app/
-- An **admin email** and **password**
+- Your **Owner email** and **password**
 
-Open the link in **Google Chrome** or **Microsoft Edge** for the smoothest experience. Mobile works too.
+Open the link in **Google Chrome** or **Microsoft Edge** for the smoothest
+experience. Mobile works too.
+
+> If you used this system before, your old login still works — it is now your
+> **Owner** account.
 
 ---
 
-## Test 1 — Sign in as admin
+## Test 1 — Sign in as the Owner
 
 1. Open https://vehical-info.vercel.app/
 2. You'll automatically land on a sign-in page
-3. Enter the admin email and password we sent you
+3. Enter your Owner email and password
 4. Click **Sign in**
 
 ✅ **What you should see:**
-- A dashboard with your email shown at the top right and an `admin` badge
-- A navigation bar containing: **Dashboard, Customers, Pending, Bank Recovery, Daily Summary, Admin**
-- Quick-access tiles for Pending Customers, Bank Recovery, Daily Summary, Total Customers
-
-> The tiles for Customers, Pending, Bank Recovery, etc. will start working in the upcoming days. For now, focus on the **Admin** section.
+- A page titled **Owner Overview** with an `owner` badge at the top right
+- A row of summary boxes: **Branches, Customers, Active loans, Staff**
+- A simple navigation bar with just **Dashboard** and **Branches**
+- If you have no branches yet, a button inviting you to create your first one
 
 ---
 
-## Test 2 — Open the Admin Panel
+## Test 2 — Create your first branch
 
-1. From the dashboard, click **Admin** in the top navigation
-2. Click the **Users** tile
+A branch is created together with the person who will manage it (its Admin).
+
+1. Click **Branches** in the top navigation
+2. In the **Create branch** form, fill in:
+   - Branch name: `Pune Branch`
+   - Code (optional): `PUN`
+   - City (optional): `Pune`
+   - Branch admin email: `pune.admin@test.com`
+   - Admin password: `Welcome123!`
+3. Click **Create branch**
 
 ✅ **What you should see:**
-- An "Add user" form at the top
-- A table listing all users in the system (just yourself for now), marked **(you)**, with role **admin** and status **Active**
+- A green confirmation banner
+- A card for **Pune Branch**, showing `pune.admin@test.com` listed as its Admin
+
+> The branch Admin can sign in straight away with the email and password you
+> just set — you don't need to involve us.
 
 ---
 
-## Test 3 — Create a new employee
+## Test 3 — Create a second branch
 
-This proves you can add staff yourself, without involving us.
+Repeat Test 2 to make another branch, so you can later confirm branches stay
+separate:
 
-1. In the **Add user** form fill:
-   - Email: `employee1@test.com`
+- Branch name: `Mumbai Branch`
+- Code: `MUM`
+- City: `Mumbai`
+- Branch admin email: `mumbai.admin@test.com`
+- Admin password: `Welcome123!`
+
+✅ A second branch card appears for **Mumbai Branch**.
+
+---
+
+## Test 4 — See all your branches at a glance
+
+1. Click **Dashboard** in the top navigation
+
+✅ **What you should see:**
+- The summary boxes at the top now count **2 branches**
+- A card for each branch showing its **Customers, Loans and Staff** counts
+  (these will be zero for now — they fill in as branches start working)
+
+---
+
+## Test 5 — Sign in as a branch Admin
+
+This shows that a branch Admin sees only their own branch.
+
+1. Open a **new incognito / private browser window**
+   (Chrome: Ctrl+Shift+N · Edge: Ctrl+Shift+N · Safari: Cmd+Shift+N)
+2. Visit https://vehical-info.vercel.app/
+3. Sign in with `pune.admin@test.com` / `Welcome123!`
+
+✅ **What you should see:**
+- A dashboard showing the **Pune Branch** name near the top
+- An `admin` badge (not `owner`)
+- A navigation bar with **Dashboard, Customers, Pending, Bank Recovery,
+  Daily Summary, Admin**
+
+### Confirm the Owner area is protected
+
+1. While signed in as the Pune Admin, type this address by hand:
+   `https://vehical-info.vercel.app/dashboard/owner`
+2. ✅ You are sent back to the normal dashboard — only the Owner can open the
+   Owner area.
+
+---
+
+## Test 6 — A branch Admin adds their own staff
+
+1. Still signed in as the Pune Admin, click **Admin** in the navigation
+2. Click the **Users** tile
+3. ✅ You see only **Pune Branch** staff — just the Pune Admin for now
+4. In the **Add user** form, fill in:
+   - Email: `pune.employee@test.com`
    - Password: `Welcome123!`
    - Role: `Employee`
    - Leave the range fields empty
-2. Click **Add user**
+5. Click **Add user**
 
-✅ **What you should see:**
-- A green confirmation banner at the top: *"Created employee1@test.com"*
-- A new row in the table for that user, with role **employee** and status **Active**
+✅ A green banner appears and the new employee shows up in the list.
 
----
-
-## Test 4 — Sign in as that employee
-
-1. Open a **new incognito / private browser window** (Chrome: Ctrl+Shift+N · Edge: Ctrl+Shift+N · Safari: Cmd+Shift+N)
-2. Visit https://vehical-info.vercel.app/
-3. Sign in with `employee1@test.com` / `Welcome123!`
-
-✅ **What you should see:**
-- The dashboard, but with **no Admin link** in the navigation
-- Role badge says **employee**, not admin
-
-### Confirm role gating works
-
-1. While logged in as the employee, try typing this URL by hand:
-   `https://vehical-info.vercel.app/dashboard/admin`
-2. ✅ You should be redirected back to the dashboard automatically — employees cannot view admin pages.
-
-3. Sign out from this incognito window.
+You can also add a **Sub-ID** account here (a temporary data-entry login). Use
+role `Sub-ID` and give it a record range, for example start `1` and end `500`.
 
 ---
 
-## Test 5 — Create a Sub-ID (data-entry account)
+## Test 7 — Branches stay separate
 
-Sub-IDs are temporary accounts you'll use later to bulk-enter your physical record books. Each Sub-ID is restricted to a specific range of records (e.g., "records 1 to 500").
+1. Open another incognito window and sign in as the **Mumbai** Admin
+   (`mumbai.admin@test.com` / `Welcome123!`)
+2. Go to **Admin → Users**
 
-1. Back in your admin browser, on the **Users** page, click **Add user** again with:
-   - Email: `entry1@test.com`
+✅ **What you should see:**
+- Only **Mumbai Branch** staff
+- The Pune people (`pune.admin@test.com`, `pune.employee@test.com`) are
+  **nowhere to be seen** — branches cannot view each other's information.
+
+---
+
+## Test 8 — The Owner can look inside any branch
+
+1. Back in your **Owner** window, go to **Dashboard**
+2. Click the **Pune Branch** card
+
+✅ **What you should see:**
+- A detailed view of Pune Branch: its totals, its staff list, and a record of
+  recent activity
+- This is a **view-only** screen — the Owner watches over branches but the
+  day-to-day work is done by each branch's own Admin and staff.
+
+---
+
+## Test 9 — Add a second Admin to a branch
+
+A branch can safely have more than one Admin (useful when one is on leave).
+
+1. As the Owner, go to **Branches**
+2. On the **Pune Branch** card, use the **Add admin** box:
+   - Email: `pune.admin2@test.com`
    - Password: `Welcome123!`
-   - Role: `Sub-ID`
-   - Range start: `1`
-   - Range end: `500`
-2. Click **Add user**
+3. Click **Add admin**
 
-✅ **What you should see:**
-- New row appears with role `sub_id`, range `1 – 500`, status **Active**
+✅ The new admin appears under Pune Branch's Admins list.
 
-### Sign in as the Sub-ID
+### Safety guardrail
 
-1. Open another incognito window
-2. Sign in with `entry1@test.com` / `Welcome123!`
-
-✅ **What you should see:**
-- A simplified screen titled **Bulk Data Entry**
-- A clear note: *"You can add customer records within your assigned range only."*
-- Range shown: **1 – 500**
-- No navigation menu, no admin tiles — only the entry-focused view
-
-3. Sign out.
+The system protects each branch from being left with **no Admin**. While a
+branch has only one Admin, that Admin cannot remove or disable themselves. Once
+a second Admin exists, those actions are allowed again.
 
 ---
 
-## Test 6 — Change someone's role
+## Test 10 — Archive a branch
 
-1. As admin, on the Users page, find the row for `employee1@test.com`
-2. Change the role dropdown from **Employee** to **Sub-ID**
-3. Set range start `501`, end `1000`
-4. Click **Save**
+If a branch closes, you can archive it (this hides it without losing anything).
 
-✅ **What you should see:**
-- Green banner: *"Role updated"*
-- The row now shows role `sub_id` and range `501 – 1000`
+1. As the Owner, go to **Branches**
+2. On a test branch card, click **Archive**
 
-5. Sign in as `employee1@test.com` in incognito → ✅ they now see the **Bulk Data Entry** screen (their role changed live).
+✅ The card shows an **Archived** label. Clicking **Restore** brings it back.
 
 ---
 
-## Test 7 — Disable a user
+## Test 11 — Sign out
 
-1. As admin, on the row for `employee1@test.com`, click **Disable**
+1. Click **Sign out** in the top-right corner
 
-✅ **What you should see:**
-- Green banner: *"Account disabled"*
-- Status badge flips from **Active** to **Disabled**
-
-2. Try to sign in as `employee1@test.com` in incognito
-
-✅ **What you should see:**
-- Sign-in is rejected — you're sent back to the login page. Disabled accounts cannot log in.
-
-3. Back as admin, click **Enable** on the same row → status returns to **Active** and they can sign in again.
-
----
-
-## Test 8 — Safety guardrails
-
-The system protects you from locking yourself out. Try each of these and confirm the system blocks them:
-
-1. On your own row, try to change role from **Admin** to **Employee** → ✅ Red banner: *"You cannot demote yourself"*
-2. ✅ The **Disable** button on your own row is greyed out and unclickable
-3. ✅ The **Delete** button on your own row is greyed out and unclickable
-
-> If you create a **second admin** first and then try to demote/disable the original admin, those will work — the system only blocks operations that would leave you with **zero** admins.
-
----
-
-## Test 9 — Delete a user
-
-1. As admin, on the row for `entry1@test.com`, click **Delete**
-
-✅ **What you should see:**
-- Green banner: *"User deleted"*
-- The row disappears completely
-- That user can no longer sign in
-
----
-
-## Test 10 — Sign out
-
-1. Click **Sign out** in the top-right of the dashboard
-
-✅ **What you should see:**
-- You're returned to the login page
+✅ You are returned to the login page.
 
 ---
 
@@ -185,8 +226,10 @@ Please let us know:
 
 | Item | Status |
 |---|---|
-| Did you receive working admin credentials? | Yes / No |
-| Did all 10 tests pass? | Yes / No |
+| Did you receive working Owner credentials? | Yes / No |
+| Were you able to create branches with their admins? | Yes / No |
+| Did each branch Admin see only their own branch? | Yes / No |
+| Did all 11 tests pass? | Yes / No |
 | Anything that didn't work as described? | (notes) |
 | Anything confusing or unclear in the screens? | (notes) |
 | On a phone, did the screens fit and work? | Yes / No |
@@ -195,20 +238,28 @@ Please let us know:
 
 ## What's coming next
 
-The next few days bring:
+The next few days bring, **inside each branch**:
 
-- **Customer onboarding** — full add-customer form with guarantor and vehicle details
-- **Smart search** — find any customer by name, RC number, engine number, mobile, or Aadhaar
-- **Customer card** — single screen showing customer + guarantor + vehicle + loan history
-- **EMI tracking + auto penalty** — log payments, system applies penalty automatically after the grace period
-- **Pending customer list** — filter by 0 / 1 / 3 / 5 / Below 3 / Above 5 overdue installments
-- **Bank Recovery lists** — one per partner bank, color-coded
+- **Customer onboarding** — full add-customer form with guarantor and vehicle
+  details
+- **Smart search** — find any customer by name, RC number, engine number,
+  mobile, or Aadhaar
+- **Customer card** — single screen showing customer + guarantor + vehicle +
+  loan history
+- **EMI tracking + auto penalty** — log payments; the system applies penalty
+  automatically after the grace period
+- **Pending customer list** — filter by 0 / 1 / 3 / 5 / Below 3 / Above 5
+  overdue installments
+- **Bank Recovery lists** — one per partner bank, colour-coded
 - **Daily Summary** — end-of-day cash + online collections, totals, pending
-- **Foreclosure & Seizure** — early loan closure calculator and vehicle repossession logging
+- **Foreclosure & Seizure** — early loan closure calculator and vehicle
+  repossession logging
 - **Documents & Keys** — track physical handover statuses
 
 You'll get an updated test guide for each new piece as it ships.
 
 ---
 
-*If anything goes wrong during testing — a page won't load, a button does nothing, an error message appears — please screenshot it and send it over. Even small issues are useful to hear about.*
+*If anything goes wrong during testing — a page won't load, a button does
+nothing, an error message appears — please screenshot it and send it over. Even
+small issues are useful to hear about.*
