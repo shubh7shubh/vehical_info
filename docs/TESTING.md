@@ -12,9 +12,46 @@ This document describes how to verify each phase end-to-end. Run through it afte
 - Dev server running: `npm run dev` → http://localhost:3000
 
 Useful Supabase Dashboard URLs (replace project ref if it changes):
-- Users: https://supabase.com/dashboard/project/eeqyslialzgpatutsnwh/auth/users
-- SQL Editor: https://supabase.com/dashboard/project/eeqyslialzgpatutsnwh/sql/new
-- Table Editor: https://supabase.com/dashboard/project/eeqyslialzgpatutsnwh/editor
+- Users: https://supabase.com/dashboard/project/szebgodbabwluaxowhvz/auth/users
+- SQL Editor: https://supabase.com/dashboard/project/szebgodbabwluaxowhvz/sql/new
+- Table Editor: https://supabase.com/dashboard/project/szebgodbabwluaxowhvz/editor
+
+---
+
+## Automated tests
+
+Two layers, both runnable on demand — you never have to wait a real month for an
+installment to come due (see the "simulating time" note in Phase 4).
+
+### Unit tests — Vitest (pure logic, no DB)
+
+```bash
+npm test          # one-shot
+npm run test:watch
+```
+
+Covers `lib/loan-status.ts` — the schedule math and the 4 reminder buckets
+(`monthsElapsed`, `expectedInstallments`, `monthsBehind`, `categorize`). These
+are the exact rules the header counts, the customers list and the DB RPC all use,
+so a green run means the colour logic is correct at every boundary
+(0 → green, 1–2 → yellow, 3 → orange, >3 → red).
+
+### Database tests — pgTAP (RPCs, triggers, RLS)
+
+Requires the local stack (Docker):
+
+```bash
+npx supabase start      # first run pulls images
+npx supabase test db    # runs supabase/tests/*.sql
+```
+
+`supabase/tests/ledger_test.sql` proves, against a real Postgres:
+`months_elapsed()`, the `customer_status_counts()` buckets, **per-branch**
+account-number dedup (same number allowed in a different branch), the sub-ID
+range cap, `create_customer` duplicate rejection, and that `log_payment` lets an
+employee record an installment but **rejects the owner** (read-only). Time is
+simulated by backdating `purchase_date` and seeding a payment history — nothing
+is waited for.
 
 ---
 
@@ -321,9 +358,90 @@ When two customers share a name, ✅ both appear with a disambiguation hint
 
 ---
 
-## Phase 4 — Payments + Auto Penalty + Pending List (planned)
+## Phase 4 — Ledger Entry + Installment Registry + Reminder Counts
 
-> To be filled in once Phase 4 ships.
+> Goal: prove a sub-ID can bulk-enter loan-book customers (deduped), an employee
+> can record monthly installments and follow-ups against a customer, and the
+> header shows the 4 colour-coded reminder counts — all branch-scoped, with the
+> owner seeing every branch's buckets.
+
+### 0. Apply the migrations
+
+`npx supabase db push` — applies `20260609120000_ledger_fields.sql` (new customer
+/ payment columns + the `followups` table) and `20260609120100_ledger_rpcs.sql`
+(extended `create_customer`, `log_payment`, `customer_status_counts`, owner
+buckets). Additive — no existing data is touched.
+
+### Simulating time (read this first)
+
+A customer's reminder colour is computed from **`purchase_date` vs. today**, so
+you never wait for a real month to pass. To make a customer look 3 months behind,
+set their **purchase date 3 months in the past** and log fewer installments than
+are due. Examples below use this.
+
+| Want to see… | Purchase date | Installments logged |
+|---|---|---|
+| 🟢 green (on time) | 5 months ago | 5 |
+| 🟡 yellow (1–2 behind) | 5 months ago | 3 |
+| 🟠 orange (3 behind) | 5 months ago | 2 |
+| 🔴 red (>3 behind) | 5 months ago | 1 (or 0) |
+
+### 1. Sub-ID bulk entry (deduped)
+
+1. As a branch admin → **Admin → Users** → add a Sub-ID with range `1–500`.
+2. Sign in as that sub-ID → ✅ the dashboard now shows the **loan-book entry
+   form** plus a live **Entered / Remaining** progress strip (not just the range).
+3. Add a customer: account no `3473`, name, village/post/taluka/district,
+   mobile(s), model no, purchase date, loan amount, installment, tenure.
+   ✅ Green "Added account 3473 — …" banner; the **Entered** count goes up by one.
+4. Negative — duplicate: add another customer with account no `3473` again →
+   ✅ red banner "A customer with account number 3473 already exists"; nothing
+   saved.
+5. Negative — range cap: once the entered count reaches the range size, the next
+   save → ✅ "sub-id range exhausted".
+
+### 2. Account number is unique per branch (not globally)
+
+1. As the **Pune** sub-ID/admin, add account `3473`.
+2. As the **Mumbai** admin, add a customer with account `3473` → ✅ allowed. Each
+   branch keeps its own loan book.
+
+### 3. Installment registry (employee)
+
+1. As an employee → **Customers** → search by name / mobile / **account number**
+   → open the customer → **EMI History** tab.
+2. ✅ The tab shows a status badge, "Paid X of Y", an **Add installment** form,
+   the **payments grid** (Sr / Date / Month / Installment / Penalty / Total /
+   Receipt / Sign) and a **Follow-ups** log.
+3. Record an installment: month #, date, amount (defaults to the EMI), penalty,
+   receipt no, mode, signature. ✅ Green banner; the row appears with the correct
+   **Total = installment + penalty**; "Paid X of Y" increments.
+4. Add a follow-up note ("promised to pay on 20th") → ✅ it appears with a
+   timestamp. Add another next time you chase them — they stack newest-first.
+
+### 4. Reminder counts in the header
+
+1. Create a few customers using the **Simulating time** table above.
+2. ✅ The header shows 4 pills — 🟢 🟡 🟠 🔴 — with this branch's counts. On a
+   phone they appear in the row under the header.
+3. Click a pill → ✅ the Customers list is filtered to that colour band; each row
+   also shows its own colour badge + `A/c` number. **Clear** removes the filter.
+4. Log enough installments on a red customer to catch them up → reload → ✅ they
+   move to green and the counts shift.
+
+### 5. Branch scoping + owner view
+
+1. Counts and the registry only ever reflect the signed-in user's branch (a
+   second branch's customers never appear).
+2. As the **owner** → `/dashboard/owner` → ✅ each branch card shows that branch's
+   🟢 🟡 🟠 🔴 buckets. The owner has no installment/registry controls
+   (read-only at the DB layer).
+
+### 6. Automated coverage
+
+Run `npm test` (Vitest) and `npx supabase test db` (pgTAP) — see **Automated
+tests** above. Together they pin the bucket math, dedup, range cap, and the
+owner-reject rule without any manual data entry.
 
 ---
 

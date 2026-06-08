@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { requireUser } from "@/lib/auth/current-user";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SubmitButton } from "@/components/submit-button";
 import { MobileNav } from "@/components/mobile-nav";
+import { StatusCounts } from "@/components/status-counts";
+import type { LoanColor } from "@/lib/loan-status";
 import { logoutAction } from "../(auth)/login/actions";
 
 const baseNav = [
@@ -79,6 +82,26 @@ export default async function DashboardLayout({
       : [...baseNav];
   const brandHref = isOwner ? "/dashboard/owner" : "/dashboard";
 
+  // Branch-scoped reminder counts for the header triage pills (admin/employee
+  // only — the owner has its own nav and sees per-branch buckets on its
+  // dashboard instead). The RPC is security-invoker, so it returns this
+  // user's branch only.
+  let counts: Record<LoanColor, number> | null = null;
+  if (!isOwner) {
+    const supabase = await createSupabaseServerClient();
+    const { data } = await supabase.rpc("customer_status_counts");
+    const r = (Array.isArray(data) ? data[0] : data) as
+      | Record<LoanColor, number>
+      | null
+      | undefined;
+    counts = {
+      green: Number(r?.green ?? 0),
+      yellow: Number(r?.yellow ?? 0),
+      orange: Number(r?.orange ?? 0),
+      red: Number(r?.red ?? 0),
+    };
+  }
+
   return (
     <div className="flex min-h-screen flex-1 flex-col bg-background">
       <header className="sticky top-0 z-20 bg-header-bg text-header-fg shadow-sm">
@@ -98,8 +121,11 @@ export default async function DashboardLayout({
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            {counts ? (
+              <StatusCounts counts={counts} className="hidden sm:flex" />
+            ) : null}
             {!isOwner && user.branchName ? (
-              <span className="hidden rounded-full bg-accent-soft px-2.5 py-1 text-[11px] font-semibold text-accent sm:inline">
+              <span className="hidden rounded-full bg-accent-soft px-2.5 py-1 text-[11px] font-semibold text-accent lg:inline">
                 {user.branchName}
               </span>
             ) : null}
@@ -127,6 +153,11 @@ export default async function DashboardLayout({
         </div>
         {/* Mobile sign-out as a row under header (since logout is a server action, not a link) */}
         <div className="border-t border-header-border md:hidden">
+          {counts ? (
+            <div className="mx-auto flex w-full max-w-7xl items-center gap-2 px-4 pt-2">
+              <StatusCounts counts={counts} />
+            </div>
+          ) : null}
           <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-2 text-xs text-header-fg-muted">
             <span className="truncate">
               {user.email}

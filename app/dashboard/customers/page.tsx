@@ -3,6 +3,8 @@ import { UserPlus, AlertTriangle, ChevronRight, Users } from "lucide-react";
 import { requireUser } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { CustomerSearch } from "@/components/customer-search";
+import { StatusBadge, STATUS_META } from "@/components/status-counts";
+import { loanColor, type LoanColor } from "@/lib/loan-status";
 
 type OneOrMany<T> = T | T[] | null;
 
@@ -10,13 +12,21 @@ function one<T>(v: OneOrMany<T>): T | null {
   return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
+type LoanEmbed = {
+  tenure_months: number;
+  status: string;
+  payments: { count: number }[];
+};
+
 type ListRow = {
   id: string;
   first_name: string;
   middle_name: string | null;
   last_name: string | null;
+  account_no: string | null;
   address_village: string | null;
   address_taluka: string | null;
+  purchase_date: string | null;
   mobiles: string[];
   banks: OneOrMany<{ name: string }>;
   vehicles: OneOrMany<{
@@ -24,6 +34,7 @@ type ListRow = {
     vehicle_name: string | null;
     engine_no_1: string | null;
   }>;
+  loans: OneOrMany<LoanEmbed>;
 };
 
 type SearchRow = {
@@ -33,6 +44,7 @@ type SearchRow = {
   last_name: string | null;
   address_village: string | null;
   address_taluka: string | null;
+  account_no: string | null;
   mobiles: string[];
   aadhaar: string | null;
   rc_no: string | null;
@@ -44,12 +56,14 @@ type SearchRow = {
 type Row = {
   id: string;
   name: string;
+  accountNo: string | null;
   place: string;
   mobiles: string[];
   rc_no: string | null;
   vehicleName: string | null;
   bankName: string | null;
   engineMissing: boolean;
+  color: LoanColor | null;
 };
 
 function fullName(
@@ -73,6 +87,12 @@ function CustomerCard({ row }: { row: Row }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold text-foreground">{row.name}</span>
+          {row.accountNo ? (
+            <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
+              A/c {row.accountNo}
+            </span>
+          ) : null}
+          {row.color ? <StatusBadge color={row.color} /> : null}
           {row.engineMissing ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
               <AlertTriangle size={10} /> Record incomplete
@@ -95,15 +115,20 @@ function CustomerCard({ row }: { row: Row }) {
   );
 }
 
+const STATUS_KEYS: LoanColor[] = ["green", "yellow", "orange", "red"];
+
 export default async function CustomersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; status?: string }>;
 }) {
   await requireUser();
-  const { q } = await searchParams;
+  const { q, status } = await searchParams;
   const query = (q ?? "").trim();
   const isSearch = query.length > 0;
+  const statusFilter = STATUS_KEYS.includes(status as LoanColor)
+    ? (status as LoanColor)
+    : null;
 
   const supabase = await createSupabaseServerClient();
 
@@ -115,12 +140,14 @@ export default async function CustomersPage({
     rows = ((data as SearchRow[] | null) ?? []).map((r) => ({
       id: r.id,
       name: fullName(r.first_name, r.middle_name, r.last_name),
+      accountNo: r.account_no,
       place: place(r.address_village, r.address_taluka),
       mobiles: r.mobiles ?? [],
       rc_no: r.rc_no,
       vehicleName: r.vehicle_name,
       bankName: r.bank_name,
       engineMissing: r.engine_missing,
+      color: null,
     }));
   } else {
     const { count } = await supabase
@@ -129,21 +156,29 @@ export default async function CustomersPage({
       .is("deleted_at", null);
     totalCount = count ?? 0;
 
+    // A wider window when filtering by status so the bucket isn't truncated by
+    // the recent-50 cap.
     const { data } = await supabase
       .from("customers")
       .select(
-        "id, first_name, middle_name, last_name, address_village, address_taluka, mobiles, banks(name), vehicles(rc_no, vehicle_name, engine_no_1)",
+        "id, first_name, middle_name, last_name, account_no, address_village, address_taluka, purchase_date, mobiles, banks(name), vehicles(rc_no, vehicle_name, engine_no_1), loans(tenure_months, status, payments(count))",
       )
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
-      .limit(50)
+      .limit(statusFilter ? 500 : 50)
       .returns<ListRow[]>();
 
     rows = (data ?? []).map((r) => {
       const vehicle = one(r.vehicles);
+      const loan =
+        (Array.isArray(r.loans)
+          ? r.loans.find((l) => l.status === "active") ?? r.loans[0]
+          : r.loans) ?? null;
+      const paidCount = loan?.payments?.[0]?.count ?? 0;
       return {
         id: r.id,
         name: fullName(r.first_name, r.middle_name, r.last_name),
+        accountNo: r.account_no,
         place: place(r.address_village, r.address_taluka),
         mobiles: r.mobiles ?? [],
         rc_no: vehicle?.rc_no ?? null,
@@ -153,22 +188,35 @@ export default async function CustomersPage({
           !vehicle ||
           !vehicle.engine_no_1 ||
           vehicle.engine_no_1.trim() === "",
+        color: loan
+          ? loanColor({
+              purchaseDate: r.purchase_date,
+              tenureMonths: loan.tenure_months,
+              paidCount,
+            })
+          : null,
       };
     });
+
+    if (statusFilter) {
+      rows = rows.filter((r) => r.color === statusFilter);
+    }
   }
+
+  const heading = isSearch
+    ? `Results for “${query}”`
+    : statusFilter
+      ? `${STATUS_META[statusFilter].label} · ${rows.length} customer${rows.length === 1 ? "" : "s"}`
+      : totalCount != null
+        ? `${totalCount} customer${totalCount === 1 ? "" : "s"} in your branch`
+        : "Your branch's customers";
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Customers</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {isSearch
-              ? `Results for “${query}”`
-              : totalCount != null
-                ? `${totalCount} customer${totalCount === 1 ? "" : "s"} in your branch`
-                : "Your branch's customers"}
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{heading}</p>
         </div>
         <Link
           href="/dashboard/customers/new"
@@ -179,6 +227,18 @@ export default async function CustomersPage({
       </div>
 
       <CustomerSearch defaultValue={query} />
+
+      {statusFilter ? (
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">Filtered by status</span>
+          <Link
+            href="/dashboard/customers"
+            className="rounded-full border border-border px-2 py-0.5 font-medium hover:bg-muted"
+          >
+            Clear
+          </Link>
+        </div>
+      ) : null}
 
       {isSearch && rows.length > 1 ? (
         <p className="text-xs text-muted-foreground">
@@ -193,9 +253,11 @@ export default async function CustomersPage({
           <p className="mt-3 text-sm text-muted-foreground">
             {isSearch
               ? "No customers match that search."
-              : "No customers yet — add your first one."}
+              : statusFilter
+                ? "No customers in this status band."
+                : "No customers yet — add your first one."}
           </p>
-          {!isSearch ? (
+          {!isSearch && !statusFilter ? (
             <Link
               href="/dashboard/customers/new"
               className="mt-3 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
@@ -212,7 +274,7 @@ export default async function CustomersPage({
         </div>
       )}
 
-      {!isSearch && totalCount != null && totalCount > 50 ? (
+      {!isSearch && !statusFilter && totalCount != null && totalCount > 50 ? (
         <p className="text-center text-xs text-muted-foreground">
           Showing the 50 most recent. Use search to find any customer.
         </p>

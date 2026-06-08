@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Building2, Users, Receipt, ChevronRight } from "lucide-react";
 import { requireOwner } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { STATUS_META } from "@/components/status-counts";
+import type { LoanColor } from "@/lib/loan-status";
 
 type BranchStat = {
   branch_id: string;
@@ -14,7 +16,13 @@ type BranchStat = {
   sub_id_count: number;
   customer_count: number;
   active_loan_count: number;
+  green: number;
+  yellow: number;
+  orange: number;
+  red: number;
 };
+
+const STATUS_ORDER: LoanColor[] = ["green", "yellow", "orange", "red"];
 
 export default async function OwnerDashboard() {
   const user = await requireOwner();
@@ -153,6 +161,21 @@ export default async function OwnerDashboard() {
                     </div>
                   ))}
                 </dl>
+                <div className="flex flex-wrap gap-1">
+                  {STATUS_ORDER.map((c) => {
+                    const m = STATUS_META[c];
+                    return (
+                      <span
+                        key={c}
+                        title={m.label}
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${m.badge}`}
+                      >
+                        <span className={`h-2 w-2 rounded-full ${m.dot}`} />
+                        {Number(b[c])}
+                      </span>
+                    );
+                  })}
+                </div>
                 <div className="mt-auto flex items-center gap-1 text-xs font-medium text-accent opacity-0 transition group-hover:opacity-100">
                   Open branch <ChevronRight size={14} />
                 </div>

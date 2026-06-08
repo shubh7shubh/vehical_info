@@ -6,9 +6,14 @@ import {
   Receipt,
   Users,
   ChevronRight,
+  CheckCircle2,
 } from "lucide-react";
 import { requireUser } from "@/lib/auth/current-user";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { CustomerSearch } from "@/components/customer-search";
+import { LedgerCustomerForm } from "@/components/ledger-customer-form";
+
+type Bank = { id: string; name: string };
 
 const headerStats = [
   {
@@ -55,36 +60,95 @@ const tiles = [
   },
 ];
 
-export default async function DashboardHome() {
+export default async function DashboardHome({
+  searchParams,
+}: {
+  searchParams: Promise<{ ok?: string; error?: string }>;
+}) {
   const user = await requireUser();
+  const { ok, error } = await searchParams;
 
   if (user.role === "owner") {
     redirect("/dashboard/owner");
   }
 
   if (user.role === "sub_id") {
+    const supabase = await createSupabaseServerClient();
+    const { data: banks } = await supabase
+      .from("banks")
+      .select("id, name")
+      .order("name")
+      .returns<Bank[]>();
+
+    // Sub-IDs can read their own customers (RLS), so this count is their live
+    // progress against the assigned range.
+    const { count } = await supabase
+      .from("customers")
+      .select("id", { count: "exact", head: true })
+      .eq("created_by", user.id)
+      .is("deleted_at", null);
+
+    const range = user.subIdRange;
+    const rangeSize = range ? range.end - range.start + 1 : null;
+    const entered = count ?? 0;
+    const remaining = rangeSize != null ? Math.max(rangeSize - entered, 0) : null;
+    const today = new Date().toISOString().slice(0, 10);
+
     return (
       <div className="space-y-6">
         <div className="rounded-2xl border border-border bg-surface p-6 shadow-sm">
           <h1 className="text-lg font-semibold">Bulk Customer Entry</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Signed in as <strong>{user.email}</strong>. You can add customer
-            records within your assigned range only.
+            Signed in as <strong>{user.email}</strong>. Add customer records from
+            the loan book — one per entry.
           </p>
-          {user.subIdRange ? (
-            <div className="mt-4 inline-flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-1.5 text-sm">
-              <span className="text-muted-foreground">Range</span>
-              <span className="font-semibold text-accent">
-                {user.subIdRange.start} – {user.subIdRange.end}
-              </span>
+          {range ? (
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+              <div className="inline-flex items-center gap-2 rounded-lg bg-accent-soft px-3 py-1.5">
+                <span className="text-muted-foreground">Range</span>
+                <span className="font-semibold text-accent">
+                  {range.start} – {range.end}
+                </span>
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-lg bg-surface-muted px-3 py-1.5">
+                <span className="text-muted-foreground">Entered</span>
+                <span className="font-semibold text-foreground">
+                  {entered}
+                  {rangeSize != null ? ` / ${rangeSize}` : ""}
+                </span>
+              </div>
+              {remaining != null ? (
+                <div className="inline-flex items-center gap-2 rounded-lg bg-surface-muted px-3 py-1.5">
+                  <span className="text-muted-foreground">Remaining</span>
+                  <span className="font-semibold text-foreground">
+                    {remaining}
+                  </span>
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="mt-3 text-sm text-warning">
-              No range assigned yet. Ask your admin to assign one before
-              entering records.
+              No range assigned yet. Ask your admin to assign one before entering
+              records.
             </p>
           )}
         </div>
+
+        {ok ? (
+          <div className="flex items-start gap-2 rounded-lg border border-success/30 bg-success-soft px-3 py-2 text-sm text-success">
+            <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
+            <span>{decodeURIComponent(ok)}</span>
+          </div>
+        ) : null}
+
+        {range ? (
+          <LedgerCustomerForm
+            banks={banks ?? []}
+            today={today}
+            error={error}
+            submitLabel="Add customer"
+          />
+        ) : null}
       </div>
     );
   }

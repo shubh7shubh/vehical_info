@@ -282,14 +282,68 @@ branch-name lookup.
 
 ---
 
-## Phase 4 — Day 4: Payment Logging + Auto Penalty Engine + Pending List
-**Demo:** Log a payment → penalty auto-calculated. Pending list filters (0/1/3/5/Below 3/Above 5) all work.
+## Phase 4 — Ledger Entry + Installment Registry + Reminder Counts ✅ SHIPPED (2026-06-09)
+**Built on the `phase-4-ledger-registry` feature branch.**
+**Demo:** A sub-ID bulk-enters loan-book customers (deduped by account number);
+an employee searches a customer and records monthly installments + follow-ups;
+the header shows 4 colour-coded reminder counts so staff know who to chase — all
+branch-scoped, with the owner seeing every branch's buckets.
 
-- Payment entry form (cash / online + UTR field, with masking logic for employees).
-- **DB trigger `apply_penalty_on_payment()`** on payments insert/update — implements grace + penalty math per loan config.
-- **`pg_cron` daily sweep** at 18:30 UTC running `run_penalty_sweep()` — picks up loans where no payment was logged.
-- **`get_pending_customers(filter)`** RPC powering the pending list page.
-- Penalty visible on customer card; Admin can edit/waive (gated for Phase 6 OTP — for now just admin-only without OTP).
+> Client review reshaped Phase 4 around the **physical loan book** (one ledger row
+> per customer + a monthly payment grid). This slice delivers the data model,
+> the sub-ID entry UI (pulled forward from Phase 6), the installment registry and
+> the reminder triage. The **automatic** penalty engine + `pg_cron` sweep and the
+> 0/1/3/5 pending-list bands remain for a later slice (see "Deferred" below).
+
+**What shipped:**
+- **Schema extended to the ledger** (`20260609120000_ledger_fields.sql`, additive):
+  `customers` gains `account_no` (unique **per branch**), `address_post`,
+  `address_district`, `model_no`, `purchase_date`; `payments` gains `month_no`,
+  `penalty_paise`, `receipt_no`, `signature` (total = installment + penalty,
+  derived); new branch-scoped **`followups`** table (the per-customer follow-up
+  log — an array of {note, time}) with the full Phase 3+ checklist (branch_id NOT
+  NULL, `set_branch_id` arm, index, RLS + `followups_owner_read`, audit trigger).
+- **RPCs** (`20260609120100_ledger_rpcs.sql`): `create_customer` extended with the
+  ledger fields + **per-branch account-number dedup** + purchase-date-anchored
+  schedule; **`log_payment`** (the registry write — employee/admin only, owner
+  rejected); **`customer_status_counts()`** (the 4 buckets, security-invoker so
+  branch-scoped); `owner_branch_stats()` extended with per-branch buckets;
+  `search_customers` now also matches/returns the account number. Shared month
+  math lives in `months_elapsed()`.
+- **Reminder buckets (pure months-behind):** 0 → green, 1–2 → yellow, 3 → orange,
+  >3 → red — the same rule in Postgres and in `lib/loan-status.ts`.
+- **Sub-ID dashboard** is now a real **loan-book entry form** with live
+  Entered/Remaining progress and a success flash (was a static range panel).
+- **Installment registry** lives on the customer card's **EMI History** tab:
+  status badge, "Paid X of Y", add-installment form (`log_payment`), the payments
+  grid, and the follow-up log (add + newest-first list).
+- **Header reminder pills** (admin/employee) link to the customers list filtered
+  by colour; the customers list shows each row's `A/c` number + colour badge; the
+  **owner dashboard** shows each branch's buckets.
+- **Tests:** Vitest unit suite for the bucket/date logic (`npm test`, 15 cases)
+  + pgTAP DB suite (`npx supabase test db`) covering dedup, the per-branch
+  uniqueness, the sub-ID range cap, the status buckets and the owner-reject rule.
+  Time is **simulated** (backdated `purchase_date` + seeded payments) — no waiting
+  a real month.
+
+**Critical files:**
+- `supabase/migrations/20260609120000_ledger_fields.sql`,
+  `supabase/migrations/20260609120100_ledger_rpcs.sql`
+- `lib/loan-status.ts` (+ `.test.ts`), `vitest.config.ts`,
+  `supabase/tests/ledger_test.sql`
+- `components/ledger-customer-form.tsx`, `components/status-counts.tsx`
+- `app/dashboard/page.tsx`, `app/dashboard/layout.tsx`,
+  `app/dashboard/customers/{page,new/page,new/actions,[id]/page,[id]/actions}.tsx`,
+  `app/dashboard/owner/page.tsx`
+
+**Decisions (confirmed with client):** extend (not flatten) the schema; pure
+months-behind buckets; account number is the dedup key (sub-ID range stays a count
+cap); penalty is entered manually per installment row (matches the book).
+
+**Deferred to a later slice:** automatic penalty accrual
+(`apply_penalty_on_payment()` trigger + `pg_cron` daily sweep) and the
+0/1/3/5/Below-3/Above-5 pending-list page. The reminder buckets already provide
+overdue triage in the meantime.
 
 ---
 
