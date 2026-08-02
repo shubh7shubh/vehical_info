@@ -33,6 +33,25 @@ Is round mein naya kya hai:
 - Upar header mein **4 rang ke counts** dikhte hain (🟢 🟡 🟠 🔴) taaki staff ko
   pata chale kis customer ke peeche jaana hai.
 
+### ✨ Aapke pichle feedback par jo kaam hua (yeh zaroor test karo)
+
+Aapne jo 8 baatein bataayi thi, woh sab ho gayi hain:
+
+> 📄 **Sirf naye changes test karne hain?** Uske liye ek alag chhoti guide hai:
+> **`docs/CLIENT_TESTING_NEW_CHANGES_HINGLISH.md`** — usme sirf yeh 8 cheezein
+> hain, poora system dobara test karne ki zarurat nahi.
+
+| Aapne kaha | Ab system mein | Kahan test karein |
+|---|---|---|
+| Har EMI ki **invoice print** nikalni chahiye | Har hapte ki ek **A5 pavti** print hoti hai (ek kaagaz par 2 copy — Office + Customer) | Test 10a |
+| Hapta bharne ka **option nahi mil raha tha** | Ab **Record EMI** ka button customer list mein, customer page par, aur dashboard par — teeno jagah hai | Test 10 |
+| Har page par **Back button** chahiye | Har page ke upar **Back** ka button aa gaya | Test 18 |
+| Print par **kitne hapte baaki hain** dikhna chahiye | Pavti par **"Paid 2 of 12 · PENDING 10"** aur agli tareekh chhapti hai | Test 10a |
+| Loan/sale date daalte hi **First EMI date** aani chahiye | Date daalte hi **First EMI date apne aap** bhar jati hai (aap badal bhi sakte ho) | Test 7 |
+| Penalty **mahine ka ₹500** ho | Penalty ka box apne aap **₹500 × kitne mahine late** bhar deta hai | Test 10 |
+| Bank ke naam **Dhanshree** aur **Bhagyalaxmi** | Bank list mein ab yahi do naam hain | Test 7 |
+| Customer page par **Edit / Print / Invoice Print** | Teeno button har customer ke page par | Test 10a, 19, 20 |
+
 ---
 
 ## Har role kya kar sakta hai (aur uska login kahan test hota hai)
@@ -43,9 +62,9 @@ login karke uske features test karoge. Niche poora picture:
 
 | Role | Login is guide mein | Kya kar **sakta** hai | Kya **NAHI** kar sakta |
 |---|---|---|---|
-| **Owner** | **Test 1** — account pehle se ready (`client@vehiclefinance.in`) | Branches + unke Admin banana; sabhi branches ke totals aur 🟢🟡🟠🔴 ek screen par dekhna; kisi bhi branch ke andar **view-only** jhaankna | Khud customer/installment add nahi kar sakta — woh kaam branch ka staff karta hai (system-level par read-only) |
-| **Admin** | **Test 5** — aap **Test 2** mein banate ho | Apni branch poori chalana: Employee/Sub-ID add karna, customers add + search, customer card, installment + follow-up record karna, reminder counts dekhna | Doosri branch ka kuch bhi nahi dekh sakta; Owner area nahi khol sakta |
-| **Employee** | **Test 6** — aap banate ho | Apni branch mein customers add + search, customer card kholna, **installment + follow-up record karna**, reminder counts dekhna | **Admin → Users** panel nahi khol sakta (staff manage nahi kar sakta); doosri branch nahi dekh sakta |
+| **Owner** | **Test 1** — account pehle se ready (`client@vehiclefinance.in`) | Branches + unke Admin banana; sabhi branches ke totals aur 🟢🟡🟠🔴 ek screen par dekhna; kisi bhi branch ke andar **view-only** jhaankna | Khud customer/installment add ya **edit** nahi kar sakta — woh kaam branch ka staff karta hai (system-level par read-only) |
+| **Admin** | **Test 5** — aap **Test 2** mein banate ho | Apni branch poori chalana: Employee/Sub-ID add karna, customers add + search + **edit**, customer card, installment + follow-up record karna, **pavti aur khata print karna**, reminder counts dekhna | Doosri branch ka kuch bhi nahi dekh sakta; Owner area nahi khol sakta |
+| **Employee** | **Test 6** — aap banate ho | Apni branch mein customers add + search + **edit**, customer card kholna, **installment + follow-up record karna**, **pavti aur khata print karna**, reminder counts dekhna | **Admin → Users** panel nahi khol sakta (staff manage nahi kar sakta); doosri branch nahi dekh sakta |
 | **Sub-ID** | **Test 13** — aap banate ho | Sirf ek **entry form** — purani bahi ke customers bulk add karna, apni di hui range tak | Na poori nav, na customer card, na installment — sirf entry; range khatam hote hi account **apne aap band** ho jata hai |
 
 > **Login kaise karein (har role same):** website kholo → email + password daalo →
@@ -106,11 +125,12 @@ aur aapko sochna nahi padega ki kya bharein.
 | District (जि.) | `Pune` |
 | Mobile | `9876543210` |
 | Model number | `Hero Splendor Plus` |
-| Purchase date | **5 mahine pehle ki date** (niche samjhaaya hai) |
+| Purchase / loan date | **5 mahine pehle ki date** (niche samjhaaya hai) |
+| First EMI date | **kuch mat karo — apne aap bhar jayega** |
 | Loan amount | `60000` |
 | Installment (hapta) | `5000` |
 | Tenure (kitne mahine) | `12` |
-| Bank | jo list mein pehla aaye |
+| Bank | `Dhanshree Bank` |
 
 > **Purchase date kya daalein?** System customer ka rang (status) iss tareekh se
 > ginta hai, toh testing ke liye hum date **peeche** rakhte hain taaki turant
@@ -263,8 +283,9 @@ Branch Admin (ya Employee) apni branch mein customers add karta hai.
    | District | `Pune` |
    | Mobile | `9876543210` |
    | Model number | `Hero Splendor Plus` |
-   | Purchase date * | 5 mahine pehle ki date (jaise `18-01-2026`) |
-   | Bank * | list ka pehla bank |
+   | Purchase / loan date * | 5 mahine pehle ki date (jaise `18-01-2026`) |
+   | First EMI date * | **haath se mat bharo** — dekho niche kya likha hai |
+   | Bank * | `Dhanshree Bank` |
    | Loan amount * | `60000` |
    | Installment (hapta) * | `5000` |
    | Tenure * | `12` |
@@ -273,11 +294,32 @@ Branch Admin (ya Employee) apni branch mein customers add karta hai.
      ("Vehicle / Guarantor") ke andar hain aur **optional** hain — test ke liye
      inhe khaali chhod sakte ho, ya kholkar vehicle name / RC number bhar sakte
      ho.
+
+   ### 🆕 First EMI date apne aap aati hai
+   Jaise hi aap **Purchase / loan date** daaloge, uske bagal wala
+   **First EMI date** ka box **apne aap bhar jayega** — theek **ek mahina baad**
+   ki tareekh. Neeche chhote akshar mein likha aayega *"Filled automatically —
+   one month after the purchase date."*
+
+   ✅ **Yeh do cheezein try karo:**
+   - Purchase date badal kar dekho → First EMI date bhi apne aap khisak jayegi.
+   - First EMI date **khud badal do** (jaise 10 din aage) → ab woh likha aayega
+     *"Set by hand"* aur woh apne aap nahi badlegi. Wapas automatic chahiye toh
+     **Reset to automatic** par click karo.
+
+   ### 🆕 Bank ke naam
+   ✅ Bank ki list mein ab **Dhanshree Bank** aur **Bhagyalaxmi Bank** dikhne
+   chahiye (pehle "Bank A" / "Bank B" thay).
+
 4. **Save customer** par click karo
 
 ✅ **Aapko kya dikhna chahiye:**
 - Aap seedhe **Ramesh Patil** ke page par chale jaoge jismein account `3473` aur
   sab details dikhengi.
+- Upar ek **button ki line** dikhegi: **Record EMI payment · Edit · Print ·
+  Invoice print**.
+- **Loan** tab kholo → ✅ wahan **First EMI date** aur
+  **Penalty: Monthly fixed · ₹500** dikhega.
 
 ### Do cheezein try karo (galti jaan-bujhkar karo)
 
@@ -314,8 +356,11 @@ apne gaon aur mobile number ke saath dikhenge taaki aap unhe alag pehchaan sako.
 
 ✅ **Aapko kya dikhna chahiye:**
 - Customer ka poora card jismein upar tabs hon: **Customer, Vehicle, Guarantor,
-  Loan, EMI History, Foreclosure / Seizure, Documents & Keys**
+  Loan, EMI / Payments, Foreclosure / Seizure, Documents & Keys**
 - Header mein customer ka **account number** aur ek **rang ka badge** (status)
+- Tabs ke upar **4 button**: **Record EMI payment**, **Edit**, **Print**,
+  **Invoice print** (Invoice print tabhi dikhta hai jab kam se kam ek hapta
+  bhara ho)
 - **Customer, Vehicle, Guarantor aur Loan** tabs woh details dikhayenge jo aapne
   bhari thi. Baaki tabs aage features ke saath bharte jayenge.
 - Phone par tab strip side mein slide hoti hai taaki har tab tak pahuncha ja sake.
@@ -327,13 +372,28 @@ apne gaon aur mobile number ke saath dikhenge taaki aap unhe alag pehchaan sako.
 Yeh system ka dil hai — physical bahi ki tarah, har mahine ka hapta yahin likhte
 hain.
 
+### 🆕 Hapta bharne ka option ab 3 jagah hai
+
+Aapne kaha tha ki hapta bharne ka option milta nahi hai. Ab **teen** raaste hain
+— teeno try karke dekho:
+
+1. **Customers list se seedha:** **Customers** kholo → har customer ke card ke
+   neeche-daayein **Record EMI** ka button hai → click karo, seedhe hapta bharne
+   wale form par pahunch jaoge.
+2. **Customer ke page se:** customer kholo → upar **Record EMI payment** ka neela
+   button.
+3. **Dashboard se:** Dashboard par **Record EMI Payment** naam ki nayi tile hai →
+   click karke customer search karo.
+
+### Hapta record karo
+
 1. Employee (ya Admin) ke roop mein → **Customers** → search box mein
-   `3473` (ya `Ramesh`) type karke search karo → **Ramesh Patil** kholo →
-   **EMI History** tab par jao
-2. ✅ Is tab par dikhega: ek status badge, **"Paid X of Y"** (kitne hapte bhar
-   diye / kitne due hain), ek **Add installment** form, ek **payments grid**
-   (Sr / Date / Month / Installment / Penalty / Total / Receipt / Sign) aur ek
-   **Follow-ups** log
+   `3473` (ya `Ramesh`) type karke search karo → **Ramesh Patil** ke card par
+   **Record EMI** click karo
+2. ✅ Is tab par dikhega: ek status badge, **"Paid X of Y · Z pending"** aur
+   **Next due** tareekh, ek **Add installment** form, ek **payments grid**
+   (Sr / Date / Month / Installment / Penalty / Total / Receipt / Sign /
+   **Invoice**) aur ek **Follow-ups** log
 3. **Add installment** form bharo —
 
    **📋 Example — pehla hapta:**
@@ -343,19 +403,72 @@ hain.
    | Month number | `1` |
    | Date | aaj ki tareekh |
    | Installment amount | `5000` (apne aap EMI aa jaata hai) |
-   | Penalty | `0` (ya `100` agar late aaya tha) |
+   | Penalty | **apne aap bhara hua aayega** — niche padho |
    | Receipt number | `R-001` |
    | Mode | `Cash` |
    | Signature | tick karo (✓) |
 
-   Save karo. ✅ Green banner aayega; payments grid mein ek row dikhegi jismein
-   **Total = 5000 + 0 = 5000** (ya penalty daali toh `5000 + 100 = 5100`);
-   "Paid 1 of 12" dikhega.
-4. **Ek aur hapta add karke dekho** — Month number `2`, amount `5000`, receipt
-   `R-002`. ✅ Ab "Paid 2 of 12" ho jayega aur grid mein 2 rows dikhengi.
+   ### 🆕 Penalty apne aap ₹500 prati mahina
+   Ramesh 5 mahine purana hai aur abhi tak ek bhi hapta nahi bhara, matlab
+   **5 mahine late**. Isliye Penalty ka box apne aap **₹2,500** (₹500 × 5) bhar
+   ke aayega, aur neeche likha hoga *"Penalty pre-filled at ₹500 × 5 months late
+   = ₹2,500. Edit it, or set 0 to waive."*
 
-> **Note:** Penalty abhi haath se daalni hai (jaise bahi mein likhte ho).
-> Automatic penalty calculation baad wale update mein aayega.
+   ✅ **Yeh aapke control mein hai** — number badal sakte ho, ya `0` karke
+   penalty maaf kar sakte ho. System zabardasti nahi lagata.
+
+   Test ke liye penalty `500` kar do aur Save karo.
+
+   ✅ Green banner aayega **"Installment recorded"** — aur uske bagal mein ek
+   **Print receipt** ka button (yeh Test 10a hai). Payments grid mein ek row
+   dikhegi jismein **Total = 5000 + 500 = 5500**, aur "Paid 1 of 12 · 11 pending".
+4. **Ek aur hapta add karke dekho** — Month number `2`, amount `5000`, penalty
+   `0`, receipt `R-002`. ✅ Ab "Paid 2 of 12 · 10 pending" ho jayega aur grid mein
+   2 rows dikhengi.
+
+---
+
+## Test 10a — 🆕 EMI ki pavti (invoice) print karo
+
+Yeh aapki sabse badi demand thi — har hapte ki print customer ko dene ke liye.
+
+### Turant print (hapta bharne ke baad)
+
+1. Hapta save karne ke baad jo green banner aaya tha, usmein **Print receipt**
+   par click karo.
+
+### Purane hapte ki print
+
+- **Kisi bhi row ki:** payments grid mein har row ke aakhir mein **Invoice**
+  column hai jismein `INV-000001` jaisa button hai → click karo.
+- **Sabse aakhri hapte ki:** customer ke page par upar **Invoice print** button.
+
+### ✅ Print page par kya dikhna chahiye
+
+| Cheez | Kya likha hoga |
+|---|---|
+| Sabse upar | Aapki **branch ka naam**, address aur phone |
+| Pavti number | **Invoice INV-000001** (system ka apna number) aur aapka likha **Receipt book no. R-001** |
+| Customer | `A/c 3473`, `Ramesh Suresh Patil`, gaon-post-taluka-zilla, mobile, model |
+| Paisa | Installment `₹5,000`, Penalty `₹500`, **TOTAL PAID `₹5,500`** |
+| **Kitne baaki** | **`Paid 1 of 12`** aur bade akshar mein **`PENDING 11`** |
+| Agli tareekh | **Next due** — agla hapta kab bharna hai |
+| Sabse neeche | **Received by** aur **Customer signature** ki do lines |
+
+1. **Print receipt** (ya `Ctrl + P`) dabao
+2. ✅ Print preview mein dekho:
+   - Ek hi A4 kaagaz par **do pavti** — upar **Office copy**, neeche
+     **Customer copy**. Beech mein katne ki dotted line. Kaagaz kaat kar ek copy
+     customer ko do, ek apne paas rakho.
+   - Print mein app ka **neela header, menu aur buttons nahi aane chahiye** —
+     sirf pavti.
+3. **Purani pavti dobara print karke dekho:** grid mein **pehle** hapte ka
+   Invoice button dabao → ✅ us par **`Paid 1 of 12 · PENDING 11`** hi likha
+   rahega, `Paid 2` nahi. Kyunki pavti us din ka record hai — baad mein bhare
+   hapte usko badalte nahi. Yeh jaan-bujh kar aisa rakha hai.
+
+> **Printer ke baare mein:** yeh normal A4/A5 printer ke liye banaya hai jo aapke
+> paas pehle se hai — koi special machine ki zarurat nahi.
 
 ---
 
@@ -388,8 +501,13 @@ cart ke number ki tarah.
 - 🔴 **Red** — 3 se zyada hapte peeche
 
 **Yeh kaise kaam karta hai (asaan example):** Ramesh ki purchase date **5 mahine
-pehle** thi, matlab ab tak **5 hapte** bharne the. Aapne abhi **2 hapte** bhare
+pehle** thi, toh uska **pehla hapta 4 mahine pehle** due hua tha (purchase + 1
+mahina). Us hisaab se ab tak **5 hapte** bharne the. Aapne abhi **2 hapte** bhare
 (Test 10 mein). Toh woh `5 − 2 = 3` hapte peeche hai → 🟠 **Orange**.
+
+> Ab yeh ginti **First EMI date** se hoti hai. Agar aap kisi customer ko First
+> EMI date aage kar do (jaise 2 mahine baad), toh utne hapte "due" nahi maane
+> jayenge aur uska rang bhi uske hisaab se badlega.
 
 **📋 Har rang khud banakar dekho** — 5 mahine purani purchase date waale alag-alag
 dummy customers banao aur utne hapte log karo:
@@ -526,7 +644,86 @@ aa jaati hai.
 
 ---
 
-## Test 18 — Sign out karo
+## Test 18 — 🆕 Har page par Back button
+
+Aapne kaha tha ki har page mein back button hona chahiye.
+
+1. Kisi bhi role se login karo
+2. **Customers** kholo → ✅ page ke sabse upar **Back to Dashboard** ka button
+3. Kisi customer ko kholo → ✅ **Back to Customers**
+4. Us customer par **Edit** dabao → ✅ **Back to Customer**
+5. **Invoice print** dabao → ✅ **Back to Customer** (pavti se seedha customer
+   par, beech mein kahin nahi)
+6. **Dashboard** par jao → ✅ yahan Back button **nahi** dikhega — yeh sabse
+   pehla page hai, iske peeche kuch hai hi nahi. Yeh sahi hai.
+
+✅ Owner ke area mein bhi check karo: **Branches** → kisi branch par click →
+**Back to Branches**.
+
+> Back button phone par bhi utna hi bada hai ki ungli se aaram se dab jaye.
+
+---
+
+## Test 19 — 🆕 Customer ki details Edit karo
+
+Ab galti sudharne ke liye record dobara banane ki zarurat nahi.
+
+1. Employee (ya Admin) se → **Customers** → **Ramesh Patil** kholo
+2. Upar **Edit** button par click karo
+3. ✅ Wahi form khulega jo customer add karte waqt aata hai, lekin **sab kuch
+   pehle se bhara hua** — naam, gaon, mobile, loan amount, hapta, tenure, dates,
+   bank, sab.
+4. Kuch badal ke dekho — jaise **Village** ko `Wagholi` se `Kesnand` kar do, aur
+   **Mobile number 2** mein `9000000000` daal do
+5. **Save changes** par click karo
+
+✅ **Aapko kya dikhna chahiye:**
+- Aap wapas customer ke page par aa jaoge, upar green banner **"Customer
+  updated"**
+- **Customer** tab mein nayi village aur naya mobile dikhega
+- **EMI / Payments** tab mein jo hapte pehle bhare thay woh **jaise ke waise**
+  hain — edit karne se paise ka record nahi badalta
+
+### Do cheezein jaan-bujhkar galat karke dekho
+
+- **Doosre customer ka account number lene ki koshish:** Edit mein account number
+  badal kar kisi doosre customer ka number (jaise `3001`) daal do → Save →
+  ✅ red message *"A customer with account number 3001 already exists"*, kuch
+  save nahi hoga.
+- **Tenure kam karne ki koshish:** aapne 2 hapte bhare hain. Tenure `1` kar ke
+  Save karo → ✅ system rok dega: *"Tenure cannot be less than the 2 installments
+  already recorded"*. Yeh isliye taaki "Paid 2 of 1" jaisa ulta record na bane.
+
+> **Kaun edit kar sakta hai:** Admin aur Employee dono (kai baar staff ko field
+> se hi sudhaar karna padta hai). Har badlav system ke andar record ho jata hai
+> ki kisne kab kya badla. **Owner** aur **Sub-ID** edit nahi kar sakte — unke
+> page par Edit ka button hi nahi aayega.
+
+---
+
+## Test 20 — 🆕 Customer ka poora record print karo
+
+Yeh **Invoice print** se alag hai. Invoice = ek hapte ki pavti. **Print** =
+customer ka poora khata, ek A4 kaagaz par.
+
+1. Customer ke page par upar **Print** button dabao
+2. ✅ Ek saaf-suthra page khulega jismein:
+   - Upar branch ka naam aur aaj ki tareekh
+   - 4 box: **Installments paid**, **Pending**, **Months behind**, **Next due**
+   - Customer, Loan, Vehicle aur Guarantor ki saari details
+   - **Installment ledger** — abhi tak ke saare hapte, ek-ek row mein
+     (date, mahina, hapta, penalty, total, cash/online, invoice number, receipt
+     number) aur sabse neeche **Total collected**
+   - Neeche do signature lines
+3. **Print statement** (ya `Ctrl + P`) dabao → ✅ preview mein app ka header,
+   menu aur buttons nahi aane chahiye — sirf khata.
+
+> Yeh page customer ko dikhane ke liye, bank ko dene ke liye, ya file mein
+> lagane ke liye kaam aata hai.
+
+---
+
+## Test 21 — Sign out karo
 
 1. Upar-right corner mein **Sign out** par click karo
 
@@ -548,7 +745,16 @@ Please humein bataiye:
 | Kya aap installment aur follow-up record kar paaye? | Haan / Nahi |
 | Kya header ke 🟢 🟡 🟠 🔴 counts sahi lage? | Haan / Nahi |
 | Kya har branch sirf apna hi staff aur customers dekh paayi? | Haan / Nahi |
-| Kya saare 18 tests pass hue? | Haan / Nahi |
+| **🆕 Kya EMI ki pavti (invoice) print theek nikli?** | Haan / Nahi |
+| **🆕 Kya pavti par "PENDING" ki ginti sahi thi?** | Haan / Nahi |
+| **🆕 Kya ek A4 par 2 copy (Office + Customer) sahi lagi, ya kuch aur chahiye?** | (notes) |
+| **🆕 Kya Record EMI ka button ab aasaani se mil raha hai?** | Haan / Nahi |
+| **🆕 Kya First EMI date apne aap sahi aa rahi hai?** | Haan / Nahi |
+| **🆕 Kya ₹500 wali penalty apne aap bharna theek hai, ya khaali chhodein?** | (notes) |
+| **🆕 Kya bank ke naam (Dhanshree / Bhagyalaxmi) sahi hain?** | Haan / Nahi |
+| **🆕 Kya Edit ka option theek chala?** | Haan / Nahi |
+| **🆕 Kya har page par Back button mil raha hai?** | Haan / Nahi |
+| Kya saare 21 tests pass hue? | Haan / Nahi |
 | Kuch aisa jo guide ke hisaab se kaam nahi kiya? | (notes) |
 | Kuch screen confusing ya samajh na aane wali lagi? | (notes) |
 | Phone par screens theek fit hui aur chali? | Haan / Nahi |
@@ -559,8 +765,9 @@ Please humein bataiye:
 
 Agle kuch din mein, **har branch ke andar** yeh aayega:
 
-- **Automatic penalty** — hapta log karne par grace period ke baad system khud
-  penalty laga dega
+- **Poori automatic penalty** — abhi system ₹500 × late mahine ka **suggestion**
+  deta hai aur aap confirm karte ho. Aage system khud grace period ke baad
+  penalty laga dega, bina kisi ko chhue.
 - **Pending customer list** — 0 / 1 / 3 / 5 / Below 3 / Above 5 overdue hapton ke
   hisaab se filter
 - **Bank Recovery lists** — har partner bank ke liye ek, rang ke hisaab se

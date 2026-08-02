@@ -345,6 +345,91 @@ cap); penalty is entered manually per installment row (matches the book).
 0/1/3/5/Below-3/Above-5 pending-list page. The reminder buckets already provide
 overdue triage in the meantime.
 
+> **Superseded in Phase 4.5:** the months-behind math is now anchored on the new
+> `loans.first_emi_date` rather than `purchase_date` directly, and the penalty is
+> monthly fixed ₹500 (pre-filled on the installment form) instead of a blank box.
+
+---
+
+## Phase 4.5 — Client Feedback Round 2 ✅ SHIPPED (2026-08-02)
+**Built on the `phase-4.5-client-feedback` feature branch.**
+**Demo:** A customer walks in, staff finds them and taps **Record EMI** straight
+from the list, the ₹500 penalty is pre-filled for the months they're late, and
+one click prints an A5 receipt showing **Paid 2 of 12 · PENDING 10**. Every page
+has a Back button, every customer page has Edit / Print / Invoice Print, and the
+First EMI date fills itself in when the loan date is entered.
+
+> The client tested the Phase 4 build and sent 8 changes (in Marathi). Two of
+> them settle PRD §8 open questions outright.
+
+**What the client asked for, and what shipped:**
+
+| # | Request | Delivered |
+|---|---|---|
+| 1 | Printable invoice for every EMI payment | `/dashboard/customers/[id]/receipt/[paymentId]` — A5 slip, two copies (Office / Customer) per A4 sheet |
+| 2 | Recording an EMI must be findable | **Record EMI** button on every customers-list row, on the customer card, and a dashboard quick tile. Tab renamed `EMI History` → `EMI / Payments` |
+| 3 | Back button on every page | `components/back-button.tsx`, mounted once in the dashboard layout |
+| 4 | Receipt must show EMIs still pending | `Paid X of Y · PENDING Z` + next due date on the slip, computed by `payment_receipt()` |
+| 5 | First EMI date auto-fills from the loan date | New `loans.first_emi_date` + `components/emi-date-fields.tsx` (auto = purchase + 1 month, editable, "Reset to automatic") |
+| 6 | Penalty is monthly ₹500 | `loans` defaults → `monthly_fixed` / 50000 paise; the installment form pre-fills ₹500 × months behind, still editable |
+| 7 | Real bank names | `Bank A → Dhanshree Bank`, `Bank B → Bhagyalaxmi Bank` (rename, so existing `bank_id` links survive) |
+| 8 | Edit / Print / Invoice Print on the customer page | Action bar on the card; new `[id]/edit` route + `update_customer()` RPC; new `[id]/print` A4 statement |
+
+**Database** (`20260802120000_penalty_banks_first_emi.sql`, `20260802120100_receipt_edit_rpcs.sql`):
+- `loans` gains `first_emi_date` (nullable; readers fall back to
+  `purchase_date + 1 month`) and new penalty defaults, with existing loans still
+  on the old defaults backfilled.
+- `payments` gains `invoice_no` — a unique, system-generated `INV-000123` from a
+  sequence. `receipt_no` remains the hand-written number from the physical book;
+  the slip prints both.
+- New **`installments_due(first_emi, purchase, tenure, as_of)`** is now the single
+  schedule helper: installment 1 is due *on* the first-EMI date, capped at tenure.
+  `customer_status_counts()` and `owner_branch_stats()` were re-anchored onto it.
+  With the default first EMI this is arithmetically identical to the old
+  purchase-anchored math — **no customer changed colour**.
+- New **`payment_receipt(payment_id)`** (security invoker, so existing branch RLS
+  applies) returns branch + customer + loan + payment + paid/pending counts in one
+  call. Counts are *as of that payment*, so a reprint stays historically correct.
+- New **`update_customer(p jsonb)`** (security definer, admin/employee, own branch
+  only). This is what lets an **employee** edit — the RLS UPDATE policies are
+  admin-only, and were left untouched. Dedup checks exclude the row being edited;
+  tenure cannot drop below the installments already recorded; payments are never
+  touched. Edits are audited automatically by the existing trigger.
+
+**Frontend:**
+- Printing uses Tailwind's `print:` variant plus one `@media print` block in
+  `app/globals.css` — no separate print layout. Header, nav, progress bar and all
+  buttons carry `print:hidden`.
+- `lib/customer-form.ts` now holds the zod schema + jsonb payload shared by the
+  add and edit actions, so the two can't drift.
+- `LedgerCustomerForm` takes `action` / `defaults` / `customerId`, serving add,
+  sub-ID bulk entry and edit from one component.
+- Flash messages moved out of the EMI tab so an edit confirmation is visible on
+  whichever tab you land on.
+
+**Critical files:**
+- `supabase/migrations/20260802120000_penalty_banks_first_emi.sql`,
+  `supabase/migrations/20260802120100_receipt_edit_rpcs.sql`
+- `app/dashboard/customers/[id]/{page,actions}.tsx`,
+  `app/dashboard/customers/[id]/{edit,print,receipt/[paymentId]}/page.tsx`
+- `components/{back-button,print-button,emi-date-fields,form-styles}.tsx`,
+  `components/ledger-customer-form.tsx`
+- `lib/{loan-status,customer-form}.ts`, `app/globals.css`
+
+**Tests:** Vitest 34 cases (`npm test`); pgTAP 38 assertions
+(`npx supabase test db`) now also covering `installments_due`, the bank rename,
+the ₹500 defaults, first-EMI derivation, `invoice_no`, historical
+`payment_receipt` counts, and `update_customer` (employee allowed, self-excluded
+dedup, tenure guard, cross-branch rejected, owner rejected).
+
+**PRD open questions closed:** #2 (penalty = monthly fixed ₹500), #8 (bank names).
+#5 (export/print) partly — receipts and statements print; Excel/PDF export is
+still open.
+
+**Still deferred:** automatic penalty *accrual* (`pg_cron` sweep — today the ₹500
+is a suggestion the employee confirms) and the 0/1/3/5/Below-3/Above-5 pending
+list page.
+
 ---
 
 ## Phase 5 — Day 5: Bank Recovery + Daily Summary + Foreclosure + Seizure

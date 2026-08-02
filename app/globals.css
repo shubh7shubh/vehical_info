@@ -90,3 +90,33 @@ input, select, textarea {
     font-size: 14px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Print — EMI receipts and customer statements.
+   App chrome (header, nav, progress bar, buttons) is hidden with Tailwind's
+   built-in `print:hidden` variant; these rules only set up the page itself.
+   --------------------------------------------------------------------------- */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html, body {
+    background: #fff;
+    color: #000;
+  }
+
+  body {
+    font-size: 11pt;
+  }
+
+  /* Never let a receipt or a ledger row be split across two sheets. */
+  .print-block {
+    break-inside: avoid;
+  }
+
+  .print-break {
+    break-after: page;
+  }
+}

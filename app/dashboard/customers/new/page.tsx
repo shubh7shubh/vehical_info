@@ -1,5 +1,3 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { requireUser } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { LedgerCustomerForm } from "@/components/ledger-customer-form";
@@ -26,13 +24,7 @@ export default async function NewCustomerPage({
   return (
     <div className="space-y-6">
       <div>
-        <Link
-          href="/dashboard/customers"
-          className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
-        >
-          <ArrowLeft size={14} /> All customers
-        </Link>
-        <h1 className="mt-2 text-lg font-semibold tracking-tight">
+        <h1 className="text-lg font-semibold tracking-tight">
           Add new customer
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">

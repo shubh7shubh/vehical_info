@@ -96,7 +96,7 @@ function ProgressBar() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed left-0 top-0 z-[100] h-[3px] bg-accent shadow-[0_0_10px_1px] shadow-accent/60"
+      className="pointer-events-none fixed left-0 top-0 z-[100] h-[3px] bg-accent shadow-[0_0_10px_1px] shadow-accent/60 print:hidden"
       style={style}
     />
   );

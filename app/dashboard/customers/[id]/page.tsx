@@ -1,10 +1,25 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, AlertTriangle, CheckCircle2, Check } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Check,
+  IndianRupee,
+  Pencil,
+  Printer,
+  ReceiptText,
+} from "lucide-react";
 import { requireUser } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatINR } from "@/lib/utils";
-import { loanColor, monthsBehind, parseISODate } from "@/lib/loan-status";
+import {
+  categorize,
+  monthsBehind,
+  nextDueDate,
+  remainingInstallments,
+  resolveFirstEmi,
+  suggestedPenaltyPaise,
+} from "@/lib/loan-status";
 import { StatusBadge } from "@/components/status-counts";
 import { SubmitButton } from "@/components/submit-button";
 import { logPaymentAction, addFollowupAction } from "./actions";
@@ -40,6 +55,7 @@ type Loan = {
   penalty_rate_paise: number;
   status: string;
   started_at: string;
+  first_emi_date: string | null;
   closed_at: string | null;
 };
 type Customer = {
@@ -69,6 +85,7 @@ type Payment = {
   mode: string;
   month_no: number | null;
   receipt_no: string | null;
+  invoice_no: string | null;
   signature: boolean;
   paid_at: string;
 };
@@ -83,7 +100,7 @@ const TABS = [
   { key: "vehicle", label: "Vehicle" },
   { key: "guarantor", label: "Guarantor" },
   { key: "loan", label: "Loan" },
-  { key: "emi", label: "EMI History" },
+  { key: "emi", label: "EMI / Payments" },
   { key: "status", label: "Foreclosure / Seizure" },
   { key: "docs", label: "Documents & Keys" },
 ] as const;
@@ -147,11 +164,16 @@ export default async function CustomerCardPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; ok?: string; error?: string }>;
+  searchParams: Promise<{
+    tab?: string;
+    ok?: string;
+    error?: string;
+    receipt?: string;
+  }>;
 }) {
-  await requireUser();
+  const me = await requireUser();
   const { id } = await params;
-  const { tab, ok, error } = await searchParams;
+  const { tab, ok, error, receipt } = await searchParams;
   const activeTab: TabKey = TABS.some((t) => t.key === tab)
     ? (tab as TabKey)
     : "customer";
@@ -160,7 +182,7 @@ export default async function CustomerCardPage({
   const { data } = await supabase
     .from("customers")
     .select(
-      "id, first_name, middle_name, last_name, account_no, address_village, address_post, address_taluka, address_district, model_no, purchase_date, mobiles, aadhaar, created_at, banks(name), vehicles(vehicle_name, rc_no, engine_no_1, engine_no_2, chassis_no), guarantors(name, mobile, address), loans(id, principal_paise, emi_paise, tenure_months, due_day, grace_days, penalty_type, penalty_rate_paise, status, started_at, closed_at)",
+      "id, first_name, middle_name, last_name, account_no, address_village, address_post, address_taluka, address_district, model_no, purchase_date, mobiles, aadhaar, created_at, banks(name), vehicles(vehicle_name, rc_no, engine_no_1, engine_no_2, chassis_no), guarantors(name, mobile, address), loans(id, principal_paise, emi_paise, tenure_months, due_day, grace_days, penalty_type, penalty_rate_paise, status, started_at, first_emi_date, closed_at)",
     )
     .eq("id", id)
     .is("deleted_at", null)
@@ -190,7 +212,7 @@ export default async function CustomerCardPage({
     const { data: pdata } = await supabase
       .from("payments")
       .select(
-        "id, amount_paise, penalty_paise, mode, month_no, receipt_no, signature, paid_at",
+        "id, amount_paise, penalty_paise, mode, month_no, receipt_no, invoice_no, signature, paid_at",
       )
       .eq("loan_id", activeLoan.id)
       .order("paid_at", { ascending: true })
@@ -206,22 +228,38 @@ export default async function CustomerCardPage({
   const followups = fData ?? [];
 
   const paidCount = payments.length;
-  const color = activeLoan
-    ? loanColor({
-        purchaseDate: customer.purchase_date,
-        tenureMonths: activeLoan.tenure_months,
-        paidCount,
-      })
+  // The schedule is anchored on the first EMI date (falls back to purchase + 1
+  // month for records created before Phase 4.5) — same rule as the DB.
+  const firstEmi = activeLoan
+    ? resolveFirstEmi(customer.purchase_date, activeLoan.first_emi_date)
     : null;
   const behind =
-    activeLoan && customer.purchase_date
+    activeLoan && firstEmi
       ? monthsBehind(
-          parseISODate(customer.purchase_date),
+          firstEmi,
           new Date(),
           activeLoan.tenure_months,
           paidCount,
         )
       : 0;
+  const color = activeLoan && firstEmi ? categorize(behind) : null;
+  const pendingCount = activeLoan
+    ? remainingInstallments(activeLoan.tenure_months, paidCount)
+    : 0;
+  const nextDue =
+    activeLoan && firstEmi
+      ? nextDueDate(firstEmi, paidCount, activeLoan.tenure_months)
+      : null;
+  // Client: "penalty should be monthly Rs 500". Pre-fill one slab per month
+  // behind — the employee can still edit it or set 0 to waive.
+  const suggestedPenalty = activeLoan
+    ? suggestedPenaltyPaise(
+        behind,
+        activeLoan.penalty_type,
+        activeLoan.penalty_rate_paise,
+      )
+    : 0;
+  const canEdit = me.role === "admin" || me.role === "employee";
   const place =
     [customer.address_village, customer.address_taluka, customer.address_district]
       .filter(Boolean)
@@ -230,13 +268,7 @@ export default async function CustomerCardPage({
   return (
     <div className="space-y-5">
       <div>
-        <Link
-          href="/dashboard/customers"
-          className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
-        >
-          <ArrowLeft size={14} /> All customers
-        </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-lg font-semibold tracking-tight">{fullName}</h1>
           {customer.account_no ? (
             <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
@@ -256,6 +288,66 @@ export default async function CustomerCardPage({
           {bankName ? ` · ${bankName}` : ""}
         </p>
       </div>
+
+      {/* Action bar — the client couldn't find where to record an EMI, and asked
+          for Edit / Print / Invoice Print on every customer page. */}
+      <div className="flex flex-wrap gap-2 print:hidden">
+        {activeLoan ? (
+          <Link
+            href={`/dashboard/customers/${customer.id}?tab=emi`}
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary-hover"
+          >
+            <IndianRupee size={16} /> Record EMI payment
+          </Link>
+        ) : null}
+        {canEdit ? (
+          <Link
+            href={`/dashboard/customers/${customer.id}/edit`}
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            <Pencil size={16} /> Edit
+          </Link>
+        ) : null}
+        <Link
+          href={`/dashboard/customers/${customer.id}/print`}
+          className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-muted"
+        >
+          <Printer size={16} /> Print
+        </Link>
+        {payments.length ? (
+          <Link
+            href={`/dashboard/customers/${customer.id}/receipt/latest`}
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            <ReceiptText size={16} /> Invoice print
+          </Link>
+        ) : null}
+      </div>
+
+      {/* Flash messages live outside the tabs so an edit / payment confirmation
+          is visible whichever tab you land on. */}
+      {ok ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-success/30 bg-success-soft px-3 py-2 text-sm text-success print:hidden">
+          <span className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="shrink-0" />
+            {decodeURIComponent(ok)}
+          </span>
+          {receipt ? (
+            <Link
+              href={`/dashboard/customers/${customer.id}/receipt/${receipt}`}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-success px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+            >
+              <Printer size={14} /> Print receipt
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
+      {error ? (
+        <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger print:hidden">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>{decodeURIComponent(error)}</span>
+        </div>
+      ) : null}
 
       {/* Tab strip — horizontally scrollable on mobile */}
       <div className="overflow-x-auto">
@@ -363,6 +455,17 @@ export default async function CustomerCardPage({
                   <Detail label="Installment / EMI" value={formatINR(l.emi_paise)} />
                   <Detail label="Tenure" value={`${l.tenure_months} months`} />
                   <Detail
+                    label="First EMI date"
+                    value={fmtDate(
+                      l.first_emi_date ??
+                        (customer.purchase_date
+                          ? (resolveFirstEmi(customer.purchase_date)
+                              ?.toISOString()
+                              .slice(0, 10) ?? null)
+                          : null),
+                    )}
+                  />
+                  <Detail
                     label="EMI due day"
                     value={`Day ${l.due_day} of each month`}
                   />
@@ -387,19 +490,6 @@ export default async function CustomerCardPage({
 
       {activeTab === "emi" ? (
         <div className="space-y-5">
-          {ok ? (
-            <div className="flex items-start gap-2 rounded-lg border border-success/30 bg-success-soft px-3 py-2 text-sm text-success">
-              <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
-              <span>{decodeURIComponent(ok)}</span>
-            </div>
-          ) : null}
-          {error ? (
-            <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
-              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-              <span>{decodeURIComponent(error)}</span>
-            </div>
-          ) : null}
-
           {!activeLoan ? (
             <Panel title="EMI history">
               <Empty text="No active loan on record — add the loan first." />
@@ -411,7 +501,9 @@ export default async function CustomerCardPage({
                   {color ? <StatusBadge color={color} /> : null}
                   <span className="text-muted-foreground">
                     Paid <strong className="text-foreground">{paidCount}</strong>{" "}
-                    of {activeLoan.tenure_months}
+                    of {activeLoan.tenure_months} ·{" "}
+                    <strong className="text-foreground">{pendingCount}</strong>{" "}
+                    pending
                     {behind > 0 ? (
                       <>
                         {" "}
@@ -423,6 +515,14 @@ export default async function CustomerCardPage({
                       </>
                     ) : null}
                   </span>
+                  {nextDue ? (
+                    <span className="text-muted-foreground">
+                      Next due{" "}
+                      <strong className="text-foreground">
+                        {nextDue.toLocaleDateString("en-IN")}
+                      </strong>
+                    </span>
+                  ) : null}
                 </div>
 
                 <form
@@ -484,7 +584,7 @@ export default async function CustomerCardPage({
                       type="number"
                       min={0}
                       step="1"
-                      defaultValue={0}
+                      defaultValue={Math.round(suggestedPenalty / 100)}
                       inputMode="numeric"
                       className={input}
                     />
@@ -519,17 +619,35 @@ export default async function CustomerCardPage({
                   </label>
                   <SubmitButton
                     pendingLabel="Recording…"
-                    className="col-span-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary-hover disabled:opacity-70 sm:col-span-3 lg:col-span-2"
+                    className="col-span-2 min-h-10 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary-hover disabled:opacity-70 sm:col-span-3 lg:col-span-2"
                   >
                     Record installment
                   </SubmitButton>
                 </form>
+
+                {suggestedPenalty > 0 ? (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Penalty pre-filled at{" "}
+                    <strong className="text-foreground">
+                      {formatINR(activeLoan.penalty_rate_paise)}
+                    </strong>{" "}
+                    × {behind} month{behind === 1 ? "" : "s"} late ={" "}
+                    <strong className="text-foreground">
+                      {formatINR(suggestedPenalty)}
+                    </strong>
+                    . Edit it, or set 0 to waive.
+                  </p>
+                ) : null}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  A printable receipt is created for every installment — the
+                  Print receipt button appears as soon as you save.
+                </p>
               </Panel>
 
               <Panel title="Payments">
                 {payments.length ? (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[640px] text-sm">
+                    <table className="w-full min-w-[760px] text-sm">
                       <thead className="bg-surface-muted text-xs uppercase tracking-wider text-muted-foreground">
                         <tr>
                           <th className="px-3 py-2 text-left">Sr</th>
@@ -540,6 +658,7 @@ export default async function CustomerCardPage({
                           <th className="px-3 py-2 text-right">Total</th>
                           <th className="px-3 py-2 text-left">Receipt</th>
                           <th className="px-3 py-2 text-center">Sign</th>
+                          <th className="px-3 py-2 text-center">Invoice</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -569,6 +688,16 @@ export default async function CustomerCardPage({
                               ) : (
                                 "—"
                               )}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <Link
+                                href={`/dashboard/customers/${customer.id}/receipt/${p.id}`}
+                                title={`Print receipt ${p.invoice_no ?? ""}`}
+                                className="inline-flex min-h-9 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-accent hover:bg-muted"
+                              >
+                                <Printer size={13} />
+                                {p.invoice_no ?? "Print"}
+                              </Link>
                             </td>
                           </tr>
                         ))}

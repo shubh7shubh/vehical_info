@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SubmitButton } from "@/components/submit-button";
 import { MobileNav } from "@/components/mobile-nav";
+import { BackButton } from "@/components/back-button";
 import { StatusCounts } from "@/components/status-counts";
 import type { LoanColor } from "@/lib/loan-status";
 import { logoutAction } from "../(auth)/login/actions";
@@ -49,7 +50,7 @@ export default async function DashboardLayout({
   if (user.role === "sub_id") {
     return (
       <div className="flex min-h-screen flex-1 flex-col bg-background">
-        <header className="bg-header-bg text-header-fg">
+        <header className="bg-header-bg text-header-fg print:hidden">
           <div className="mx-auto flex w-full max-w-3xl items-center justify-between px-4 py-3">
             <BrandMark />
             <div className="flex items-center gap-2 text-sm">
@@ -68,6 +69,7 @@ export default async function DashboardLayout({
           </div>
         </header>
         <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6">
+          <BackButton />
           {children}
         </main>
       </div>
@@ -104,7 +106,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen flex-1 flex-col bg-background">
-      <header className="sticky top-0 z-20 bg-header-bg text-header-fg shadow-sm">
+      <header className="sticky top-0 z-20 bg-header-bg text-header-fg shadow-sm print:hidden">
         <div className="mx-auto flex w-full max-w-7xl items-center gap-4 px-4 py-2.5">
           <BrandMark href={brandHref} />
 
@@ -175,7 +177,8 @@ export default async function DashboardLayout({
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 print:max-w-none print:px-0 print:py-0">
+        <BackButton />
         {children}
       </main>
     </div>

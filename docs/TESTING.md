@@ -445,6 +445,105 @@ owner-reject rule without any manual data entry.
 
 ---
 
+## Phase 4.5 — Receipts, Edit, Back Buttons, First-EMI Date, ₹500 Penalty
+
+Branch: `phase-4.5-client-feedback`. Two additive migrations.
+
+### 0. Apply the migrations
+
+```bash
+npx supabase db push          # remote
+# or, locally (needs Docker):
+npx supabase db reset         # replays every migration from scratch
+```
+
+`20260802120000_penalty_banks_first_emi.sql` renames the banks, flips the `loans`
+penalty defaults to `monthly_fixed` / 50000 paise (backfilling loans still on the
+old defaults), adds `loans.first_emi_date` (backfilled to `started_at + 1 month`)
+and `payments.invoice_no` (backfilled from a new sequence, unique index).
+`20260802120100_receipt_edit_rpcs.sql` adds `installments_due()`,
+`payment_receipt()` and `update_customer()`, and re-anchors `create_customer`,
+`log_payment`, `customer_status_counts` and `owner_branch_stats`.
+
+> **Sanity check that nothing moved:** the bucket counts before and after the push
+> must be identical. `installments_due` with the default first-EMI date
+> (`purchase + 1 month`) is arithmetically the same as the old
+> `least(months_elapsed(purchase, today), tenure)`.
+
+```sql
+select * from public.customer_status_counts();
+select name from public.banks order by name;          -- Bhagyalaxmi, Dhanshree
+select penalty_type, penalty_rate_paise from public.loans limit 5;
+```
+
+### 1. First EMI date auto-fills
+
+Customers → Add customer. Type a purchase date → **First EMI date** fills with
+purchase + 1 month and shows *"Filled automatically"*. Change the purchase date →
+it follows. Type your own first-EMI date → it stops following and shows *"Set by
+hand"* with a **Reset to automatic** link. Save; the Loan tab shows both dates.
+
+Verify the fallback path too — the field is nullable by design:
+
+```sql
+-- A loan with no first_emi_date must behave as purchase + 1 month.
+update public.loans set first_emi_date = null where id = '<loan-id>';
+select public.installments_due(null, purchase_date, 12) from public.customers where id = '<customer-id>';
+```
+
+### 2. Penalty suggestion (not auto-charge)
+
+Open a customer 2+ months behind → **EMI / Payments**. The Penalty box is
+pre-filled with `₹500 × months behind` and explains itself underneath. Overwrite
+it, or set `0` to waive — nothing is charged without the employee saving it.
+A `per_day` loan gets no suggestion (that needs the deferred accrual engine).
+
+### 3. Receipt printing
+
+Record an installment → the green banner carries **Print receipt**. Also reachable
+per row (the **Invoice** column) and via **Invoice print** (→ `receipt/latest`).
+
+- `Ctrl+P`: two A5 halves on one A4, no header / nav / progress bar.
+- Re-open an **older** payment's receipt: its `Paid X of Y · PENDING Z` must
+  reflect that payment's point in time, not today's total. This is
+  `payment_receipt()` counting `(paid_at, id) <= (this.paid_at, this.id)`.
+- `invoice_no` is unique and sequential; `receipt_no` stays free text.
+
+### 4. Customer edit
+
+Customer card → **Edit** (visible to admin + employee only). Employees have **no
+RLS UPDATE policy** — a working save proves the security-definer
+`update_customer()` path, not a loosened policy. Confirm the guards:
+
+| Attempt | Expected |
+|---|---|
+| Change village / EMI and save | Saved; payments untouched; `audit_log` has an UPDATE row |
+| Reuse another customer's account number | `A customer with account number … already exists` |
+| Save unchanged (same account number) | Succeeds — the dedup excludes the row being edited |
+| Tenure below installments already paid | `Tenure cannot be less than the N installments already recorded` |
+| Another branch's customer id | `Customer not found in your branch` |
+| As owner or sub_id | `Your role cannot edit customers`; no Edit button rendered |
+
+### 5. Back button
+
+`components/back-button.tsx` is mounted once in the dashboard layout and derives
+the parent from the pathname. Check `/dashboard` and `/dashboard/owner` render
+none, `…/customers/<id>/receipt/<pid>` goes back to the customer card (not to a
+bare `/receipt`), and the sub-ID shell is covered too.
+
+### 6. Automated coverage
+
+`npm test` → 34 Vitest cases. `npx supabase test db` → 38 pgTAP assertions,
+now also covering `installments_due`, the bank rename, the ₹500 defaults,
+first-EMI derivation, `invoice_no`, historical `payment_receipt` counts and every
+`update_customer` guard above.
+
+> pgTAP runs against the **local** stack. If `installments_due` reports as
+> missing, the local DB predates the migrations — run `npx supabase db reset`
+> first (`supabase start` alone does not replay new migration files).
+
+---
+
 ## Phase 5 — Bank Recovery + Daily Summary + Foreclosure + Seizure (planned)
 
 > To be filled in once Phase 5 ships.

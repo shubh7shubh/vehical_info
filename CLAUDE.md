@@ -3,7 +3,10 @@
 Internal ops platform replacing physical loan books for ~5,000 customers.
 Source of truth: `docs/PRD_VehicleFinance_v2.md`, `docs/SystemDesign_VehicleFinance.md`,
 `docs/PROJECT_REPORT.md` (7-day phase plan + status), `docs/TESTING.md` (developer
-test walkthrough), `docs/CLIENT_TESTING.md` (client-facing test plan).
+test walkthrough), `docs/CLIENT_TESTING.md` (client-facing test plan, English —
+currently behind), `docs/CLIENT_TESTING_HINGLISH.md` (full client guide, current),
+`docs/CLIENT_TESTING_NEW_CHANGES_HINGLISH.md` (per-round "what's new" sheet —
+rewrite it each time the client sends feedback).
 
 ## Stack
 - **Next.js 16.2** App Router (TypeScript, Tailwind v4 — CSS-first config in `app/globals.css`)
@@ -60,6 +63,12 @@ is implicit, represented by the `owner`.
 - `app/dashboard/admin/users/{page,actions}.tsx` — branch-scoped user management (Phase 2.5/2.7)
 - `app/dashboard/owner/*` — owner-only area (proxy-gated): cross-branch stats,
   `owner/branches/{page,actions}.tsx` branch CRUD, `owner/branches/[branchId]` drill-down
+- `app/dashboard/customers/[id]/{page,actions}.tsx` — customer card + log payment /
+  follow-up / update actions
+- `app/dashboard/customers/[id]/edit/page.tsx` — edit customer (admin + employee)
+- `app/dashboard/customers/[id]/print/page.tsx` — A4 customer statement
+- `app/dashboard/customers/[id]/receipt/[paymentId]/page.tsx` — printable EMI
+  receipt (`latest` is accepted in place of a payment id)
 - `app/api/*` — thin route handlers (Node runtime) — added in Phases 4–7
 - `lib/supabase/server.ts` — `createSupabaseServerClient()` (anon, cookie-aware via `@supabase/ssr`)
 - `lib/supabase/client.ts` — browser client
@@ -67,6 +76,12 @@ is implicit, represented by the `owner`.
   server actions / server components for admin-tier operations
 - `lib/auth/current-user.ts` — `getCurrentUser()`, `requireUser()`, `requireAdmin()`, `requireOwner()`
 - `lib/utils.ts` — `cn()`, `formatINR()`, `maskUTR()`
+- `lib/loan-status.ts` — schedule + reminder-bucket math. **Exact mirror of the
+  Postgres `months_elapsed()` / `installments_due()` functions — change both together**
+- `lib/customer-form.ts` — the zod schema + jsonb payload shared by the add and
+  edit customer server actions
+- `components/back-button.tsx` — one back affordance, mounted by the dashboard
+  layout for every page (derives the parent route from the pathname)
 - `proxy.ts` — Next 16 proxy (replaces `middleware.ts`); session refresh + role gating
 - `supabase/migrations/YYYYMMDDHHMMSS_*.sql` — schema, RLS, triggers, RPCs (source of truth)
 - `supabase/config.toml` — `supabase init` config; lets us run `npx supabase db push`
@@ -81,7 +96,11 @@ is implicit, represented by the `owner`.
 - UTR masked client-side AND server-side via RPC return shape for employees
 - New migrations always use full-timestamp filenames `YYYYMMDDHHMMSS_name.sql`;
   never edit a migration that's already been pushed — write a new one
-- Push migrations with `npx supabase db push` (CLI is linked to project ref `eeqyslialzgpatutsnwh`)
+- Push migrations with `npx supabase db push` (CLI is linked to project ref
+  `szebgodbabwluaxowhvz` — same project as `NEXT_PUBLIC_SUPABASE_URL` in `.env.local`)
+- Local testing needs Docker: `npx supabase start`, then **`npx supabase db reset`**
+  to replay migrations (`start` alone does not apply new migration files), then
+  `npx supabase test db`
 
 ## Environment Variables
 See `.env.local.example`. Required:
@@ -96,8 +115,10 @@ Same four must also be set in **Vercel → Project Settings → Environment Vari
 ## Open Questions Tracked in PRD §8
 Defer answers but design flexibly for: penalty per-customer config (#2),
 search scope (#3), grace period (#7), bank names (#8), export formats (#5).
-Defaults applied: per_day ₹50, 2-day grace, "Bank A" / "Bank B" — all swappable
-in `public.banks` and `public.loans` without schema change.
+**Answered by the client (2026-08-02):** #2 penalty is **monthly fixed ₹500**
+(`loans.penalty_type = 'monthly_fixed'`, `penalty_rate_paise = 50000`);
+#8 bank names are **"Dhanshree Bank"** and **"Bhagyalaxmi Bank"**.
+Still defaulted: 2-day grace (#7) — swappable per loan without schema change.
 
 ## Build Phase Status
 - [x] **Phase 1** — Project init + Vercel link + UI skeleton
@@ -105,7 +126,11 @@ in `public.banks` and `public.loans` without schema change.
 - [x] **Phase 2.5** — Admin user-management panel (lifted user CRUD out of Phase 6)
 - [x] **Phase 2.7** — Multi-branch foundation (owner role, branches, branch-scoped RLS)
 - [x] **Phase 3** — Customer mgmt + smart search + customer card (branch-scoped)
-- [ ] **Phase 4** — Payments + auto penalty + pending list
+- [x] **Phase 4** — Ledger entry + installment registry + reminder counts
+- [x] **Phase 4.5** — Client feedback: EMI receipt/invoice print, customer statement
+      print, customer edit, back buttons, auto first-EMI date, ₹500 monthly penalty,
+      real bank names
+- [ ] **Phase 4.9** — Automatic penalty accrual (pg_cron) + 0/1/3/5 pending list
 - [ ] **Phase 5** — Bank recovery + daily summary + foreclosure + seizure
 - [ ] **Phase 6** — OTP gating + sub-ID monitoring + audit log viewer + soft-delete recovery + docs/keys
 - [ ] **Phase 7** — Realtime + cron-job.org + PWA + UAT
@@ -114,6 +139,12 @@ in `public.banks` and `public.loans` without schema change.
 - **No phase / version / "preview" labels** in UI shown to the client. Internal
   status lives in `docs/PROJECT_REPORT.md` only.
 - Login is the entry point; `/` redirects to `/login`.
+- **Back button on every page.** Provided by `<BackButton>` in the dashboard
+  layout — don't hand-roll per-page back links.
+- **Printable output uses Tailwind's `print:` variant**, not a separate layout.
+  Any new app chrome (headers, nav, floating bars, action buttons) must carry
+  `print:hidden` or it will appear on every receipt and statement. Page-level
+  print rules live in the `@media print` block in `app/globals.css`.
 - Sub-ID role gets a stripped-down `/dashboard` (no nav, no tiles) — never expose
   the full nav to a sub-ID account.
 - Owner role lands on `/dashboard/owner` (cross-branch) with its own nav

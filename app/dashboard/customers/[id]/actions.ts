@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { customerFormSchema, customerRpcPayload } from "@/lib/customer-form";
 
 const paymentSchema = z.object({
   customer_id: z.string().uuid(),
@@ -21,11 +22,19 @@ const followupSchema = z.object({
   note: z.string().trim().min(1, "Write a short note"),
 });
 
+const editSchema = customerFormSchema.extend({
+  customer_id: z.string().uuid(),
+});
+
 /** Bounce back to the EMI History tab with a flash message. */
-function back(id: string, kind: "ok" | "error", msg: string) {
-  redirect(
-    `/dashboard/customers/${id}?tab=emi&${kind}=${encodeURIComponent(msg)}`,
-  );
+function back(
+  id: string,
+  kind: "ok" | "error",
+  msg: string,
+  extra?: Record<string, string>,
+) {
+  const params = new URLSearchParams({ tab: "emi", [kind]: msg, ...extra });
+  redirect(`/dashboard/customers/${id}?${params.toString()}`);
 }
 
 export async function logPaymentAction(formData: FormData) {
@@ -50,11 +59,18 @@ export async function logPaymentAction(formData: FormData) {
   };
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.rpc("log_payment", { p: payload });
+  // log_payment returns the new payment id — pass it back so the success banner
+  // can offer "Print receipt" straight away (client request #1).
+  const { data, error } = await supabase.rpc("log_payment", { p: payload });
   if (error) back(v.customer_id, "error", error.message);
 
   revalidatePath(`/dashboard/customers/${v.customer_id}`);
-  back(v.customer_id, "ok", "Installment recorded");
+  back(
+    v.customer_id,
+    "ok",
+    "Installment recorded",
+    typeof data === "string" ? { receipt: data } : undefined,
+  );
 }
 
 export async function addFollowupAction(formData: FormData) {
@@ -77,4 +93,37 @@ export async function addFollowupAction(formData: FormData) {
 
   revalidatePath(`/dashboard/customers/${v.customer_id}`);
   back(v.customer_id, "ok", "Follow-up added");
+}
+
+/**
+ * The Edit button on the customer card. Role and branch are enforced inside
+ * `update_customer` (security definer), which is what lets an employee — who has
+ * no RLS UPDATE policy — fix a record in the field.
+ */
+export async function updateCustomerAction(formData: FormData) {
+  await requireUser();
+  const id = String(formData.get("customer_id") ?? "");
+
+  function fail(msg: string): never {
+    redirect(
+      `/dashboard/customers/${id}/edit?error=${encodeURIComponent(msg)}`,
+    );
+  }
+
+  const parsed = editSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    fail(parsed.error.issues[0]?.message ?? "Please check the form and retry");
+  }
+  const v = parsed.data!;
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc("update_customer", {
+    p: { customer_id: v.customer_id, ...customerRpcPayload(v) },
+  });
+  if (error) fail(error.message);
+
+  revalidatePath(`/dashboard/customers/${v.customer_id}`);
+  redirect(
+    `/dashboard/customers/${v.customer_id}?ok=${encodeURIComponent("Customer updated")}`,
+  );
 }

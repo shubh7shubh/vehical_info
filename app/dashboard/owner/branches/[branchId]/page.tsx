@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Building2 } from "lucide-react";
+import { Building2 } from "lucide-react";
 import { requireOwner } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -72,13 +71,6 @@ export default async function BranchDetailPage({
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/dashboard/owner"
-        className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
-      >
-        <ArrowLeft size={14} /> All branches
-      </Link>
-
       <section className="rounded-2xl border border-border bg-surface p-5 shadow-sm">
         <div className="flex items-center gap-3">
           <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-accent-soft text-accent">

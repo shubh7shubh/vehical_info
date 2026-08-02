@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import {
   AlertCircle,
   Banknote,
+  IndianRupee,
   Receipt,
   Users,
   ChevronRight,
@@ -30,6 +31,13 @@ const headerStats = [
 ];
 
 const tiles = [
+  {
+    href: "/dashboard/customers",
+    title: "Record EMI Payment",
+    desc: "Search the customer, then record the installment they came to pay",
+    Icon: IndianRupee,
+    accent: "bg-success-soft text-success",
+  },
   {
     href: "/dashboard/pending",
     title: "Pending Customers",
@@ -184,9 +192,13 @@ export default async function DashboardHome({
       </section>
 
       <section>
-        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <h2 className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Find a customer
         </h2>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Search by name, account number, mobile, RC or engine number — then open
+          the customer to record the EMI they came to pay.
+        </p>
         <CustomerSearch />
       </section>
 

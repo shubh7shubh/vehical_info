@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { UserPlus, AlertTriangle, ChevronRight, Users } from "lucide-react";
+import {
+  UserPlus,
+  AlertTriangle,
+  ChevronRight,
+  IndianRupee,
+  Users,
+} from "lucide-react";
 import { requireUser } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { CustomerSearch } from "@/components/customer-search";
@@ -15,6 +21,7 @@ function one<T>(v: OneOrMany<T>): T | null {
 type LoanEmbed = {
   tenure_months: number;
   status: string;
+  first_emi_date: string | null;
   payments: { count: number }[];
 };
 
@@ -78,40 +85,59 @@ function place(village: string | null, taluka: string | null): string {
   return [village, taluka].filter(Boolean).join(", ") || "—";
 }
 
+/**
+ * The whole card links to the customer, but a customer walking in to pay needs a
+ * one-tap route to the installment form (the client couldn't find it). A nested
+ * <Link> is invalid, so the card link is "stretched" over the card with an
+ * ::after overlay and the action sits above it on its own stacking level.
+ */
 function CustomerCard({ row }: { row: Row }) {
   return (
-    <Link
-      href={`/dashboard/customers/${row.id}`}
-      className="group flex items-start justify-between gap-3 rounded-xl border border-border bg-surface p-4 shadow-sm transition hover:border-accent/40 hover:shadow-md"
-    >
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold text-foreground">{row.name}</span>
-          {row.accountNo ? (
-            <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
-              A/c {row.accountNo}
-            </span>
-          ) : null}
-          {row.color ? <StatusBadge color={row.color} /> : null}
-          {row.engineMissing ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
-              <AlertTriangle size={10} /> Record incomplete
-            </span>
-          ) : null}
+    <div className="group relative rounded-xl border border-border bg-surface p-4 shadow-sm transition hover:border-accent/40 hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/dashboard/customers/${row.id}`}
+              className="font-semibold text-foreground after:absolute after:inset-0 after:content-['']"
+            >
+              {row.name}
+            </Link>
+            {row.accountNo ? (
+              <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
+                A/c {row.accountNo}
+              </span>
+            ) : null}
+            {row.color ? <StatusBadge color={row.color} /> : null}
+            {row.engineMissing ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
+                <AlertTriangle size={10} /> Record incomplete
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">{row.place}</div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+            {row.rc_no ? <span>RC: {row.rc_no}</span> : null}
+            {row.vehicleName ? <span>{row.vehicleName}</span> : null}
+            {row.mobiles.length ? <span>{row.mobiles.join(" · ")}</span> : null}
+            {row.bankName ? <span>{row.bankName}</span> : null}
+          </div>
         </div>
-        <div className="mt-1 text-xs text-muted-foreground">{row.place}</div>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-          {row.rc_no ? <span>RC: {row.rc_no}</span> : null}
-          {row.vehicleName ? <span>{row.vehicleName}</span> : null}
-          {row.mobiles.length ? <span>{row.mobiles.join(" · ")}</span> : null}
-          {row.bankName ? <span>{row.bankName}</span> : null}
-        </div>
+        <ChevronRight
+          size={16}
+          className="mt-0.5 hidden shrink-0 text-muted-foreground transition group-hover:text-accent sm:block"
+        />
       </div>
-      <ChevronRight
-        size={16}
-        className="mt-0.5 shrink-0 text-muted-foreground transition group-hover:text-accent"
-      />
-    </Link>
+
+      <div className="relative z-10 mt-3 flex justify-end">
+        <Link
+          href={`/dashboard/customers/${row.id}?tab=emi`}
+          className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-accent/40 bg-accent-soft px-3 py-2 text-xs font-semibold text-accent transition hover:bg-accent hover:text-accent-foreground"
+        >
+          <IndianRupee size={14} /> Record EMI
+        </Link>
+      </div>
+    </div>
   );
 }
 
@@ -161,7 +187,7 @@ export default async function CustomersPage({
     const { data } = await supabase
       .from("customers")
       .select(
-        "id, first_name, middle_name, last_name, account_no, address_village, address_taluka, purchase_date, mobiles, banks(name), vehicles(rc_no, vehicle_name, engine_no_1), loans(tenure_months, status, payments(count))",
+        "id, first_name, middle_name, last_name, account_no, address_village, address_taluka, purchase_date, mobiles, banks(name), vehicles(rc_no, vehicle_name, engine_no_1), loans(tenure_months, status, first_emi_date, payments(count))",
       )
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -191,6 +217,7 @@ export default async function CustomersPage({
         color: loan
           ? loanColor({
               purchaseDate: r.purchase_date,
+              firstEmiDate: loan.first_emi_date,
               tenureMonths: loan.tenure_months,
               paidCount,
             })
