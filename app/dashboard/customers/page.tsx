@@ -19,10 +19,10 @@ function one<T>(v: OneOrMany<T>): T | null {
 }
 
 type LoanEmbed = {
+  id: string;
   tenure_months: number;
   status: string;
   first_emi_date: string | null;
-  payments: { count: number }[];
 };
 
 type ListRow = {
@@ -187,12 +187,31 @@ export default async function CustomersPage({
     const { data } = await supabase
       .from("customers")
       .select(
-        "id, first_name, middle_name, last_name, account_no, address_village, address_taluka, purchase_date, mobiles, banks(name), vehicles(rc_no, vehicle_name, engine_no_1), loans(tenure_months, status, first_emi_date, payments(count))",
+        "id, first_name, middle_name, last_name, account_no, address_village, address_taluka, purchase_date, mobiles, banks(name), vehicles(rc_no, vehicle_name, engine_no_1), loans(id, tenure_months, status, first_emi_date)",
       )
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .limit(statusFilter ? 500 : 50)
       .returns<ListRow[]>();
+
+    // Reminder colour is amount-based now (a part-paid month still counts as
+    // behind), and PostgREST cannot sum() through an embed — so the settled
+    // counts come from one extra read of the loan_balances view rather than the
+    // old `payments(count)` embed.
+    const loanIds = (data ?? [])
+      .flatMap((r) => (Array.isArray(r.loans) ? r.loans : r.loans ? [r.loans] : []))
+      .map((l) => l.id);
+    const settledByLoan = new Map<string, number>();
+    if (loanIds.length) {
+      const { data: bal } = await supabase
+        .from("loan_balances")
+        .select("loan_id, installments_settled")
+        .in("loan_id", loanIds)
+        .returns<{ loan_id: string; installments_settled: number }[]>();
+      for (const b of bal ?? []) {
+        settledByLoan.set(b.loan_id, b.installments_settled);
+      }
+    }
 
     rows = (data ?? []).map((r) => {
       const vehicle = one(r.vehicles);
@@ -200,7 +219,7 @@ export default async function CustomersPage({
         (Array.isArray(r.loans)
           ? r.loans.find((l) => l.status === "active") ?? r.loans[0]
           : r.loans) ?? null;
-      const paidCount = loan?.payments?.[0]?.count ?? 0;
+      const paidCount = loan ? (settledByLoan.get(loan.id) ?? 0) : 0;
       return {
         id: r.id,
         name: fullName(r.first_name, r.middle_name, r.last_name),

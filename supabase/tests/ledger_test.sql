@@ -7,7 +7,7 @@
 -- trick to use for manual testing — set the purchase date in the past.
 
 begin;
-select plan(38);
+select plan(74);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: a couple of branches + a bank. (Main Branch already exists from the
@@ -369,6 +369,306 @@ select throws_like(
     )::text),
   '%cannot edit customers%',
   'update_customer: the owner stays read-only'
+);
+
+-- ===========================================================================
+-- 10. Client feedback round 3 — partial payments and the penalty ledger.
+--
+-- Fixture PART-1: Rs 5,000 EMI over 12 months, first EMI 3 months ago. Four
+-- instalments have fallen due, but only three are past their grace window, so
+-- three penalties accrue (Rs 1,500) — the newest one is not late yet.
+-- ===========================================================================
+select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated"}', true);
+
+select lives_ok(
+  format($$ select public.create_customer(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer', jsonb_build_object('account_no','PART-1','first_name','Partial','bank_id','33333333-3333-3333-3333-333333333333'),
+      'loan', jsonb_build_object('principal_paise',6000000,'emi_paise',500000,'tenure_months',12,
+                                 'purchase_date',(current_date - interval '4 months')::text)
+    )::text),
+  'create_customer: seeds the partial-payment fixture'
+);
+
+-- ---- installments_settled(): money, not rows ------------------------------
+select is(public.installments_settled(500000::bigint, 1000000::bigint, 12), 2,
+  'installments_settled: exact multiples settle whole instalments');
+select is(public.installments_settled(500000::bigint, 250000::bigint, 12), 0,
+  'installments_settled: half an EMI settles nothing');
+select is(public.installments_settled(500000::bigint, 999900::bigint, 12), 1,
+  'installments_settled: one rupee short is one instalment short');
+select is(public.installments_settled(500000::bigint, 99000000::bigint, 12), 12,
+  'installments_settled: capped at the tenure on overpayment');
+select is(public.pending_month_no(500000::bigint, 1000000::bigint, 12), 3,
+  'pending_month_no: points at the instalment the next rupee lands on');
+select is(public.pending_month_no(500000::bigint, 6000000::bigint, 12), null::int,
+  'pending_month_no: null once the whole tenure is covered');
+select is(public.pending_month_shortfall(500000::bigint, 1250000::bigint, 12), 250000::bigint,
+  'pending_month_shortfall: only the remainder is still owed on that month');
+
+-- ---- accrue_penalties(): idempotent, judged at each month''s own deadline ---
+select is(
+  public.accrue_penalties((select l.id from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'PART-1')),
+  3,
+  'accrue_penalties: charges one row per instalment past its grace window'
+);
+select is(
+  public.accrue_penalties((select l.id from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'PART-1')),
+  0,
+  'accrue_penalties: running it again charges nothing (idempotent)'
+);
+select is(
+  (select sum(pn.amount_paise)::bigint from public.penalties pn
+     join public.loans l on l.id = pn.loan_id
+     join public.customers c on c.id = l.customer_id
+    where c.account_no = 'PART-1' and pn.waived_at is null),
+  150000::bigint,
+  'accrue_penalties: Rs 500 per late month'
+);
+select is(
+  (select penalty_balance_paise from public.loan_balances lb
+     join public.customers c on c.id = lb.customer_id where c.account_no = 'PART-1'),
+  150000::bigint,
+  'loan_balances: penalty balance is charged minus collected'
+);
+
+-- ---- a partial EMI does not settle an instalment --------------------------
+select lives_ok(
+  format($$ select public.log_payment(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer_id', (select id from public.customers where account_no = 'PART-1'),
+      'installment_paise', 250000, 'penalty_paise', 0,
+      'remark', 'Part payment', 'paid_at', current_date::text
+    )::text),
+  'log_payment: accepts a payment short of the full EMI'
+);
+select is(
+  (select installments_settled from public.loan_balances lb
+     join public.customers c on c.id = lb.customer_id where c.account_no = 'PART-1'),
+  0,
+  'partial payment: half an EMI settles no instalment'
+);
+select is(
+  (select pending_month_balance_paise from public.loan_balances lb
+     join public.customers c on c.id = lb.customer_id where c.account_no = 'PART-1'),
+  250000::bigint,
+  'partial payment: the remainder is carried as the balance on EMI #1'
+);
+
+-- A second half payment completes the instalment. Two rows, one instalment —
+-- this is precisely what the old count(*) got wrong.
+select public.log_payment(jsonb_build_object(
+  'customer_id', (select id from public.customers where account_no = 'PART-1'),
+  'installment_paise', 250000, 'paid_at', current_date::text));
+select is(
+  (select installments_settled from public.loan_balances lb
+     join public.customers c on c.id = lb.customer_id where c.account_no = 'PART-1'),
+  1,
+  'partial payment: two half payments settle exactly one instalment'
+);
+
+-- ---- a charge already written survives the customer catching up ------------
+select is(
+  public.accrue_penalties((select l.id from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'PART-1')),
+  0,
+  'accrue_penalties: no new charge after a payment'
+);
+select is(
+  (select sum(pn.amount_paise)::bigint from public.penalties pn
+     join public.loans l on l.id = pn.loan_id
+     join public.customers c on c.id = l.customer_id
+    where c.account_no = 'PART-1' and pn.waived_at is null),
+  150000::bigint,
+  'accrue_penalties: an existing charge is not forgiven when the customer pays'
+);
+
+-- ---- recording 13: a penalty-only receipt ---------------------------------
+select lives_ok(
+  format($$ select public.log_payment(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer_id', (select id from public.customers where account_no = 'PART-1'),
+      'installment_paise', 0, 'penalty_paise', 50000, 'paid_at', current_date::text
+    )::text),
+  'log_payment: a penalty-only receipt is accepted'
+);
+select is(
+  (select penalty_balance_paise from public.loan_balances lb
+     join public.customers c on c.id = lb.customer_id where c.account_no = 'PART-1'),
+  100000::bigint,
+  'penalty-only receipt: the penalty balance drops by what was collected'
+);
+select throws_like(
+  format($$ select public.log_payment(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer_id', (select id from public.customers where account_no = 'PART-1'),
+      'installment_paise', 0, 'penalty_paise', 0, 'paid_at', current_date::text
+    )::text),
+  '%Enter an installment amount%',
+  'log_payment: an entirely empty receipt is still rejected'
+);
+
+-- ---- payment_receipt() carries the new breakdown, as of that payment -------
+select is(
+  (select (public.payment_receipt(pm.id)->>'pending_month_no')::int
+     from public.payments pm
+     join public.loans l on l.id = pm.loan_id
+     join public.customers c on c.id = l.customer_id
+    where c.account_no = 'PART-1' and pm.amount_paise = 250000
+    order by pm.paid_at, pm.invoice_no limit 1),
+  1,
+  'payment_receipt: names the instalment the balance is pending against'
+);
+select is(
+  (select (public.payment_receipt(pm.id)->>'pending_month_balance_paise')::bigint
+     from public.payments pm
+     join public.loans l on l.id = pm.loan_id
+     join public.customers c on c.id = l.customer_id
+    where c.account_no = 'PART-1' and pm.amount_paise = 250000
+    order by pm.paid_at, pm.invoice_no limit 1),
+  250000::bigint,
+  'payment_receipt: a reprint still shows the balance as it stood that day'
+);
+select is(
+  (select (public.payment_receipt(pm.id)->>'total_paid_today_paise')::bigint
+     from public.payments pm
+     join public.loans l on l.id = pm.loan_id
+     join public.customers c on c.id = l.customer_id
+    where c.account_no = 'PART-1' and pm.penalty_paise = 50000
+    order by pm.paid_at desc, pm.invoice_no desc limit 1),
+  550000::bigint,
+  'payment_receipt: total paid today sums every receipt up to this one'
+);
+select is(
+  (select public.payment_receipt(pm.id)->'payment'->>'kind'
+     from public.payments pm
+     join public.loans l on l.id = pm.loan_id
+     join public.customers c on c.id = l.customer_id
+    where c.account_no = 'PART-1' and pm.amount_paise = 0
+    order by pm.paid_at desc, pm.invoice_no desc limit 1),
+  'penalty',
+  'payment_receipt: a penalty-only receipt is labelled as such'
+);
+
+-- ---- recording 10 / 13: admin-only penalty and receipt edits ---------------
+-- The employee (aaaa…) is the caller here.
+select throws_like(
+  format($$ select public.set_penalty_charge(%L::jsonb) $$,
+    jsonb_build_object(
+      'penalty_id', (select pn.id from public.penalties pn
+         join public.loans l on l.id = pn.loan_id
+         join public.customers c on c.id = l.customer_id
+        where c.account_no = 'PART-1' order by pn.month_no limit 1),
+      'amount_paise', '30000'
+    )::text),
+  '%Only an admin%',
+  'set_penalty_charge: an employee cannot change a penalty'
+);
+select throws_like(
+  format($$ select public.amend_payment(%L::jsonb) $$,
+    jsonb_build_object(
+      'payment_id', (select pm.id from public.payments pm
+         join public.loans l on l.id = pm.loan_id
+         join public.customers c on c.id = l.customer_id
+        where c.account_no = 'PART-1' order by pm.paid_at, pm.invoice_no limit 1),
+      'installment_paise', '100000'
+    )::text),
+  '%Only an admin%',
+  'amend_payment: an employee cannot edit a recorded receipt'
+);
+
+-- The owner is read-only at the DB layer, so it is refused too (see the
+-- comment on set_penalty_charge — "Owner and Admin" ships as admin-only).
+select set_config('request.jwt.claims', '{"sub":"cccccccc-cccc-cccc-cccc-cccccccccccc","role":"authenticated"}', true);
+select throws_like(
+  format($$ select public.set_penalty_charge(%L::jsonb) $$,
+    jsonb_build_object(
+      'penalty_id', (select pn.id from public.penalties pn
+         join public.loans l on l.id = pn.loan_id
+         join public.customers c on c.id = l.customer_id
+        where c.account_no = 'PART-1' order by pn.month_no limit 1),
+      'amount_paise', '30000'
+    )::text),
+  '%Only an admin%',
+  'set_penalty_charge: the owner stays read-only'
+);
+select is(
+  public.accrue_penalties((select l.id from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'PART-1')),
+  0,
+  'accrue_penalties: a read-only role never triggers a write'
+);
+
+-- ---- as a Branch B admin --------------------------------------------------
+insert into auth.users (instance_id, id, aud, role, email, encrypted_password, raw_app_meta_data, raw_user_meta_data, created_at, updated_at) values
+  ('00000000-0000-0000-0000-000000000000', 'dddddddd-dddd-dddd-dddd-dddddddddddd', 'authenticated', 'authenticated', 'admin@test.local', '', '{}', '{}', now(), now());
+update public.users set role = 'admin', branch_id = '22222222-2222-2222-2222-222222222222'
+ where id = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+select set_config('request.jwt.claims', '{"sub":"dddddddd-dddd-dddd-dddd-dddddddddddd","role":"authenticated"}', true);
+
+select lives_ok(
+  format($$ select public.set_penalty_charge(%L::jsonb) $$,
+    jsonb_build_object(
+      'penalty_id', (select pn.id from public.penalties pn
+         join public.loans l on l.id = pn.loan_id
+         join public.customers c on c.id = l.customer_id
+        where c.account_no = 'PART-1' order by pn.month_no limit 1),
+      'amount_paise', '30000', 'note', 'Reduced on request'
+    )::text),
+  'set_penalty_charge: an admin can reduce a penalty'
+);
+select is(
+  (select penalty_balance_paise from public.loan_balances lb
+     join public.customers c on c.id = lb.customer_id where c.account_no = 'PART-1'),
+  80000::bigint,
+  'set_penalty_charge: the reduction flows into the penalty balance'
+);
+select lives_ok(
+  format($$ select public.set_penalty_charge(%L::jsonb) $$,
+    jsonb_build_object(
+      'penalty_id', (select pn.id from public.penalties pn
+         join public.loans l on l.id = pn.loan_id
+         join public.customers c on c.id = l.customer_id
+        where c.account_no = 'PART-1' order by pn.month_no limit 1),
+      'waive', true
+    )::text),
+  'set_penalty_charge: an admin can waive a penalty'
+);
+select is(
+  (select penalty_balance_paise from public.loan_balances lb
+     join public.customers c on c.id = lb.customer_id where c.account_no = 'PART-1'),
+  50000::bigint,
+  'set_penalty_charge: a waived charge leaves the balance'
+);
+
+-- ---- void_payment(): soft delete only -------------------------------------
+select lives_ok(
+  format($$ select public.void_payment(%L::jsonb) $$,
+    jsonb_build_object(
+      'payment_id', (select pm.id from public.payments pm
+         join public.loans l on l.id = pm.loan_id
+         join public.customers c on c.id = l.customer_id
+        where c.account_no = 'PART-1' and pm.amount_paise = 250000
+        order by pm.paid_at, pm.invoice_no limit 1),
+      'reason', 'Keyed twice'
+    )::text),
+  'void_payment: an admin can void a mis-keyed receipt'
+);
+select is(
+  (select installments_settled from public.loan_balances lb
+     join public.customers c on c.id = lb.customer_id where c.account_no = 'PART-1'),
+  0,
+  'void_payment: the voided money leaves the balances'
+);
+select is(
+  (select count(*)::int from public.payments pm
+     join public.loans l on l.id = pm.loan_id
+     join public.customers c on c.id = l.customer_id
+    where c.account_no = 'PART-1' and pm.deleted_at is not null),
+  1,
+  'void_payment: the row is soft-deleted, never removed'
 );
 
 select * from finish();

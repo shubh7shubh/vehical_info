@@ -430,6 +430,107 @@ still open.
 is a suggestion the employee confirms) and the 0/1/3/5/Below-3/Above-5 pending
 list page.
 
+> Superseded by Phase 4.9 below: the accrual engine shipped, and the ₹500 is no
+> longer a suggestion.
+
+---
+
+## Phase 4.9 — Client Feedback Round 3, Slice A ✅ SHIPPED (2026-08-12)
+
+The client sent 15 Marathi voice recordings after testing the Phase 4.5 build.
+Nine of them (1, 2, 3, 10, 11, 12, 13, 14, 15) describe one underlying problem and
+ship together here; the other six (4–9, the Foreclosure & Seizing page) are
+Phase 4.95, deliberately sequenced second because "exit seizing" needs a
+trustworthy outstanding-balance figure and this slice is what produces it.
+
+### The problem
+
+The ledger assumed every payment was exactly one full EMI. Everything downstream
+counted payment **rows** — `customer_status_counts`, `owner_branch_stats`,
+`payment_receipt.paid_count`, `update_customer`'s tenure guard, and
+`paidCount = payments.length` in both app pages. In the field customers pay short,
+pay penalty separately, or pay nothing, and the book carries the balance forward.
+Separately, `payments.penalty_paise` recorded penalty *collected* and nothing
+recorded penalty *charged*, so "remaining penalty balance" could not be computed
+at all.
+
+### The shape of the fix
+
+One substitution, everywhere:
+
+```
+count(payments)  ->  installments_settled(emi, sum(amount_paise), tenure)
+```
+
+Every downstream formula keeps its exact current shape. For any customer who has
+only ever paid whole EMIs, `settled == count` exactly — which is why **no existing
+customer changed reminder bucket on deploy**, and why all 38 pre-existing pgTAP
+assertions still pass untouched. That was the regression proof.
+
+### Database (four additive migrations)
+
+- **`payments`** — the `amount_paise > 0` CHECK becomes `>= 0` plus
+  `amount_paise + penalty_paise > 0`, which is what allows a penalty-only receipt.
+  Adds `remark` (recording 2), plus `updated_at` / `deleted_at` and a
+  `set_updated_at` trigger: a mis-keyed partial is now the likeliest support call
+  and CLAUDE.md is soft-delete-only.
+- **`public.penalties` revived** as the accrual ledger — dead since Phase 2, and it
+  already carried `branch_id`, the branch trigger, the audit trigger and RLS, so
+  reusing it satisfied the new-table checklist for free. Gains `month_no`,
+  `source`, `note`, `created_by`, `accrued_through`.
+- **`accrue_penalties(loan, as_of)`** — idempotent, security definer, one ₹500 row
+  per instalment still short at *its own* due date + `grace_days`. Judging each
+  month by its own deadline rather than by today's balance is the crux: judged by
+  today, a customer who was three months late and has since caught up would be
+  charged nothing on the first run, silently forgiving the whole backfilled
+  history. A read-only role makes it a no-op, so the lazy call from the customer
+  card cannot let an owner write. `accrue_penalties_all()` is the pg_cron entry
+  point — this *is* the long-deferred Phase 4.9 engine.
+- **`loans.penalty_accrual_from`** — the go-live escape hatch. NULL charges the
+  full history; a one-line UPDATE limits it. Open question for the client, since
+  it moves opening balances across ~5,000 records.
+- **`public.loan_balances`** — a `security_invoker = on` view, now the single read
+  model for every balance. The arithmetic drifted last round because it lived in
+  five places.
+- **`set_penalty_charge` / `amend_payment` / `void_payment`** — admin-only.
+- **`payment_receipt` v2** — returns the whole breakdown, every figure as of that
+  payment.
+
+### Two real bugs caught in verification
+
+1. `sum(bigint)` returns **numeric** in Postgres, so the helper calls in the view
+   and in `payment_receipt` failed to resolve until the aggregates were cast back.
+2. The as-of window ordered on `(paid_at, id)`. `paid_at` comes from a date input,
+   so every receipt taken on the same day carries an identical midnight timestamp
+   and the tie-break fell to comparing **random UUIDs** — making "total paid today"
+   non-deterministic between same-day receipts. Now ordered by
+   `(paid_at, invoice_no, id)`; `invoice_no` is sequence-stamped, so it is true
+   insertion order and stable even within one transaction.
+
+### App
+
+`components/payment-entry-form.tsx` is the new client island: one "Amount
+received" box, an editable penalty-first split, and a live after-this-payment
+preview driven by the same `lib/loan-status.ts` functions the receipt SQL mirrors.
+The customer card gained a balances strip, a "Pay penalty only" panel, an
+admin-gated penalty ledger and a Remark column; the receipt and the A4 statement
+gained the full breakdown. The customers list swapped its `payments(count)` embed
+for a `loan_balances` lookup.
+
+### Deliberate deviation from the client's words
+
+Recordings 9, 10 and 13 say "Owner and Admin". This ships **admin-only**: the
+owner is read-only at the DB layer, has no write policy on any operational table,
+and `current_branch_id()` is NULL for it, so it has no branch to write into. The
+role the client is excluding in all three recordings is `employee`, and admin-only
+delivers that. Raised explicitly in the round-3 test sheet for confirmation.
+
+**Tests:** 54 Vitest cases (was 34), 74 pgTAP assertions (was 38).
+
+**Deferred:** the pg_cron schedule itself (needs the extension enabled on the
+project), `penalty_type = 'per_day'` accrual (written but unused — every loan is
+monthly fixed), and the 0/1/3/5/Below-3/Above-5 pending list page.
+
 ---
 
 ## Phase 5 — Day 5: Bank Recovery + Daily Summary + Foreclosure + Seizure

@@ -10,8 +10,15 @@ import {
   remainingInstallments,
   nextDueDate,
   categorize,
-  suggestedPenaltyPaise,
   loanColor,
+  installmentsSettled,
+  pendingMonthNo,
+  pendingMonthShortfallPaise,
+  emiOverduePaise,
+  emiRemainingPaise,
+  advancePaise,
+  penaltyBalancePaise,
+  splitReceipt,
 } from "./loan-status";
 
 const d = parseISODate;
@@ -127,18 +134,126 @@ describe("categorize (0->green, 1..2->yellow, 3->orange, >3->red)", () => {
   });
 });
 
-describe("suggestedPenaltyPaise (monthly fixed Rs 500)", () => {
-  it("charges one slab per month behind", () => {
-    expect(suggestedPenaltyPaise(0, "monthly_fixed", 50000)).toBe(0);
-    expect(suggestedPenaltyPaise(1, "monthly_fixed", 50000)).toBe(50000);
-    expect(suggestedPenaltyPaise(3, "monthly_fixed", 50000)).toBe(150000);
+/* -------------------------------------------------------------------------- */
+/* Client feedback round 3 — partial payments                                  */
+/* -------------------------------------------------------------------------- */
+
+const EMI = 500000; // Rs 5,000
+const TENURE = 12;
+
+describe("installmentsSettled", () => {
+  it("counts whole EMIs covered by the money collected", () => {
+    expect(installmentsSettled(EMI, 0, TENURE)).toBe(0);
+    expect(installmentsSettled(EMI, EMI, TENURE)).toBe(1);
+    expect(installmentsSettled(EMI, 3 * EMI, TENURE)).toBe(3);
   });
-  it("suggests nothing for per-day loans (needs the auto-penalty engine)", () => {
-    expect(suggestedPenaltyPaise(3, "per_day", 5000)).toBe(0);
+  it("floors — two half payments are one instalment, not two", () => {
+    expect(installmentsSettled(EMI, EMI / 2, TENURE)).toBe(0);
+    expect(installmentsSettled(EMI, EMI + EMI / 2, TENURE)).toBe(1);
   });
-  it("is safe with missing config", () => {
-    expect(suggestedPenaltyPaise(3, null, null)).toBe(0);
-    expect(suggestedPenaltyPaise(-2, "monthly_fixed", 50000)).toBe(0);
+  it("is one short of settled when a rupee is missing", () => {
+    expect(installmentsSettled(EMI, 2 * EMI - 100, TENURE)).toBe(1);
+  });
+  it("caps at the tenure so an overpayment never reads 'Paid 13 of 12'", () => {
+    expect(installmentsSettled(EMI, 50 * EMI, TENURE)).toBe(TENURE);
+  });
+  it("is safe when the EMI is missing or zero", () => {
+    expect(installmentsSettled(0, 100000, TENURE)).toBe(0);
+  });
+
+  // The regression that matters: for anyone who has only ever paid whole EMIs,
+  // settled === the old row count, so nobody changed reminder bucket on deploy.
+  it("matches the old payment-row count for whole-EMI payers", () => {
+    const firstEmi = d("2026-01-15");
+    const today = d("2026-06-15");
+    for (let paid = 0; paid <= TENURE; paid++) {
+      expect(installmentsSettled(EMI, paid * EMI, TENURE)).toBe(paid);
+      expect(monthsBehind(firstEmi, today, TENURE, installmentsSettled(EMI, paid * EMI, TENURE)))
+        .toBe(monthsBehind(firstEmi, today, TENURE, paid));
+    }
+  });
+});
+
+describe("pendingMonthNo / pendingMonthShortfallPaise", () => {
+  it("points at the instalment the next rupee lands on", () => {
+    expect(pendingMonthNo(EMI, 0, TENURE)).toBe(1);
+    expect(pendingMonthNo(EMI, 2 * EMI, TENURE)).toBe(3);
+    expect(pendingMonthNo(EMI, 2 * EMI + 100, TENURE)).toBe(3);
+  });
+  it("is null once the whole tenure is covered", () => {
+    expect(pendingMonthNo(EMI, TENURE * EMI, TENURE)).toBeNull();
+    expect(pendingMonthNo(EMI, 99 * EMI, TENURE)).toBeNull();
+  });
+  it("asks for a full EMI when nothing has been put toward that month", () => {
+    expect(pendingMonthShortfallPaise(EMI, 0, TENURE)).toBe(EMI);
+    expect(pendingMonthShortfallPaise(EMI, 2 * EMI, TENURE)).toBe(EMI);
+  });
+  it("asks only for the remainder after a partial", () => {
+    expect(pendingMonthShortfallPaise(EMI, 300000, TENURE)).toBe(200000);
+    expect(pendingMonthShortfallPaise(EMI, EMI + 300000, TENURE)).toBe(200000);
+  });
+  it("is 0 once the loan is complete", () => {
+    expect(pendingMonthShortfallPaise(EMI, TENURE * EMI, TENURE)).toBe(0);
+  });
+});
+
+describe("emiOverduePaise / emiRemainingPaise / advancePaise", () => {
+  it("overdue is everything due by today minus everything collected", () => {
+    expect(emiOverduePaise(EMI, 5, 2 * EMI)).toBe(3 * EMI);
+    expect(emiOverduePaise(EMI, 5, 2 * EMI + 300000)).toBe(3 * EMI - 300000);
+  });
+  it("never goes negative when the customer is ahead", () => {
+    expect(emiOverduePaise(EMI, 2, 5 * EMI)).toBe(0);
+    expect(emiRemainingPaise(EMI, TENURE, 99 * EMI)).toBe(0);
+  });
+  it("remaining is the whole-life balance", () => {
+    expect(emiRemainingPaise(EMI, TENURE, 2 * EMI)).toBe(10 * EMI);
+  });
+  it("surfaces an overpayment as an advance", () => {
+    expect(advancePaise(EMI, TENURE, TENURE * EMI + 250000)).toBe(250000);
+    expect(advancePaise(EMI, TENURE, 2 * EMI)).toBe(0);
+  });
+});
+
+describe("penaltyBalancePaise", () => {
+  it("is charged minus collected", () => {
+    expect(penaltyBalancePaise(150000, 50000)).toBe(100000);
+  });
+  it("floors at 0 so a post-collection waiver never shows negative", () => {
+    expect(penaltyBalancePaise(50000, 150000)).toBe(0);
+  });
+});
+
+describe("splitReceipt (penalty first, then instalment)", () => {
+  const base = { emiPaise: EMI, emiOverduePaise: EMI, penaltyBalancePaise: 50000 };
+  it("clears the penalty before the instalment", () => {
+    expect(splitReceipt({ ...base, receivedPaise: 300000 })).toEqual({
+      towardsPenaltyPaise: 50000,
+      towardsEmiPaise: 250000,
+    });
+  });
+  it("puts everything on the penalty when that is all the money covers", () => {
+    expect(splitReceipt({ ...base, receivedPaise: 30000 })).toEqual({
+      towardsPenaltyPaise: 30000,
+      towardsEmiPaise: 0,
+    });
+  });
+  it("puts everything on the instalment when no penalty is owed", () => {
+    expect(
+      splitReceipt({ ...base, penaltyBalancePaise: 0, receivedPaise: EMI }),
+    ).toEqual({ towardsPenaltyPaise: 0, towardsEmiPaise: EMI });
+  });
+  it("lets a surplus prepay future instalments", () => {
+    expect(splitReceipt({ ...base, receivedPaise: 3 * EMI })).toEqual({
+      towardsPenaltyPaise: 50000,
+      towardsEmiPaise: 3 * EMI - 50000,
+    });
+  });
+  it("is safe with nothing received", () => {
+    expect(splitReceipt({ ...base, receivedPaise: 0 })).toEqual({
+      towardsPenaltyPaise: 0,
+      towardsEmiPaise: 0,
+    });
   });
 });
 
@@ -162,6 +277,20 @@ describe("loanColor (end-to-end scenarios)", () => {
   it("1 month behind -> yellow", () => {
     expect(
       loanColor({ purchaseDate: "2026-04-15", tenureMonths: 24, paidCount: 1, today }),
+    ).toBe("yellow");
+  });
+  it("a part-paid month still counts as behind, not settled", () => {
+    // 5 instalments due; Rs 5,000 EMI; the customer has handed over Rs 22,500,
+    // so four months are settled and the fifth is Rs 2,500 short -> 1 behind.
+    const settled = installmentsSettled(EMI, 4 * EMI + 250000, 24);
+    expect(settled).toBe(4);
+    expect(
+      loanColor({
+        purchaseDate: "2026-01-15",
+        tenureMonths: 24,
+        paidCount: settled,
+        today,
+      }),
     ).toBe("yellow");
   });
   it("returns null without a purchase date", () => {

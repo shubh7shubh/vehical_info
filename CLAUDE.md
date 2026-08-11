@@ -27,6 +27,18 @@ rewrite it each time the client sends feedback).
 - **Soft delete only.** Every table has `deleted_at`; never hard delete in v1.
 - **Audit log trigger** runs on every INSERT/UPDATE/DELETE across every table.
 - **OTP-gated admin actions:** penalty edit/waive, foreclosure, seizure approval (Phase 6).
+- **Money is counted, never rows.** A payment may be short of the EMI or
+  penalty-only, so "instalments paid" is always
+  `installments_settled(emi, sum(amount_paise), tenure)` — never
+  `count(payments)`. Every balance comes from the **`public.loan_balances`**
+  view (`security_invoker = on`); do not re-derive the arithmetic in a new place.
+- **Penalty charged and penalty collected are separate.** `payments.penalty_paise`
+  is only what was *collected*; charges live in `public.penalties`, written by the
+  idempotent `accrue_penalties()` engine. A charge is never deleted, so the
+  balance stays stable and reprintable.
+- **Receipts are historical documents.** `payment_receipt()` computes every figure
+  *as of that payment*, ordered by `(paid_at, invoice_no, id)` — never by `id`
+  alone, because same-day receipts share one midnight `paid_at`.
 - **Service role key is server-only.** Imported only from `"use server"` action files
   or server components. `lib/supabase/admin.ts` includes `import "server-only"` to enforce this.
 
@@ -76,12 +88,17 @@ is implicit, represented by the `owner`.
   server actions / server components for admin-tier operations
 - `lib/auth/current-user.ts` — `getCurrentUser()`, `requireUser()`, `requireAdmin()`, `requireOwner()`
 - `lib/utils.ts` — `cn()`, `formatINR()`, `maskUTR()`
-- `lib/loan-status.ts` — schedule + reminder-bucket math. **Exact mirror of the
-  Postgres `months_elapsed()` / `installments_due()` functions — change both together**
+- `lib/loan-status.ts` — schedule, reminder-bucket and money math. **Exact mirror
+  of the Postgres `months_elapsed()` / `installments_due()` /
+  `installments_settled()` / `pending_month_no()` functions and the
+  `loan_balances` view — change both together**
 - `lib/customer-form.ts` — the zod schema + jsonb payload shared by the add and
   edit customer server actions
 - `components/back-button.tsx` — one back affordance, mounted by the dashboard
   layout for every page (derives the parent route from the pathname)
+- `components/payment-entry-form.tsx` — the instalment entry island: one
+  "Amount received" box, an editable penalty-first split, and a live
+  after-this-payment preview
 - `proxy.ts` — Next 16 proxy (replaces `middleware.ts`); session refresh + role gating
 - `supabase/migrations/YYYYMMDDHHMMSS_*.sql` — schema, RLS, triggers, RPCs (source of truth)
 - `supabase/config.toml` — `supabase init` config; lets us run `npx supabase db push`
@@ -130,8 +147,14 @@ Still defaulted: 2-day grace (#7) — swappable per loan without schema change.
 - [x] **Phase 4.5** — Client feedback: EMI receipt/invoice print, customer statement
       print, customer edit, back buttons, auto first-EMI date, ₹500 monthly penalty,
       real bank names
-- [ ] **Phase 4.9** — Automatic penalty accrual (pg_cron) + 0/1/3/5 pending list
-- [ ] **Phase 5** — Bank recovery + daily summary + foreclosure + seizure
+- [x] **Phase 4.9** — Client feedback round 3, slice A: partial EMI payments,
+      penalty-only receipts, the `public.penalties` accrual ledger + admin
+      edit/waive, the `loan_balances` read model, remarks, and the full money
+      breakdown on the printed receipt. `accrue_penalties_all()` is ready for
+      pg_cron — the schedule itself still needs the extension enabled.
+- [ ] **Phase 4.95** — Client feedback round 3, slice B: the Foreclosure & Seizing
+      page (6-month eligibility, Add Foreclosure / Add Seizing / Exit Seizing)
+- [ ] **Phase 5** — Bank recovery + daily summary + 0/1/3/5 pending list
 - [ ] **Phase 6** — OTP gating + sub-ID monitoring + audit log viewer + soft-delete recovery + docs/keys
 - [ ] **Phase 7** — Realtime + cron-job.org + PWA + UAT
 
