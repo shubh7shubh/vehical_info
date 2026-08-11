@@ -13,6 +13,7 @@ const baseNav = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Customers", href: "/dashboard/customers" },
   { label: "Pending", href: "/dashboard/pending" },
+  { label: "Foreclosure", href: "/dashboard/foreclosure" },
   { label: "Bank Recovery", href: "/dashboard/recovery" },
   { label: "Daily Summary", href: "/dashboard/summary" },
 ];

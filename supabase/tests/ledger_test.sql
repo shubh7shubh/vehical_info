@@ -7,7 +7,7 @@
 -- trick to use for manual testing — set the purchase date in the past.
 
 begin;
-select plan(74);
+select plan(105);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: a couple of branches + a bank. (Main Branch already exists from the
@@ -669,6 +669,274 @@ select is(
     where c.account_no = 'PART-1' and pm.deleted_at is not null),
   1,
   'void_payment: the row is soft-deleted, never removed'
+);
+
+-- ===========================================================================
+-- 11. Client feedback round 3, slice B — Foreclosure & Seizing.
+--
+-- Fixtures (all in Branch B, created by the employee):
+--   FORE-1  started 7 months ago, nothing paid  -> eligible, but in arrears
+--   FORE-2  started 3 months ago                -> not eligible yet
+--   FORE-3  started 7 months ago, every due instalment paid ON TIME
+--           -> eligible, no arrears, no penalty: the Exit Seizing happy path
+-- ===========================================================================
+select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated"}', true);
+
+select lives_ok(
+  format($$ select public.create_customer(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer', jsonb_build_object('account_no','FORE-1','first_name','Foreclose','bank_id','33333333-3333-3333-3333-333333333333'),
+      'loan', jsonb_build_object('principal_paise',5000000,'emi_paise',500000,'tenure_months',12,
+                                 'purchase_date',(current_date - interval '7 months')::text)
+    )::text),
+  'create_customer: seeds the eligible foreclosure fixture'
+);
+select lives_ok(
+  format($$ select public.create_customer(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer', jsonb_build_object('account_no','FORE-2','first_name','TooSoon','bank_id','33333333-3333-3333-3333-333333333333'),
+      'loan', jsonb_build_object('principal_paise',5000000,'emi_paise',500000,'tenure_months',12,
+                                 'purchase_date',(current_date - interval '3 months')::text)
+    )::text),
+  'create_customer: seeds the not-yet-eligible fixture'
+);
+
+-- ---- the six-month rule (recordings 5 and 6) ------------------------------
+select is(
+  (public.calculate_foreclosure((select l.id from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-1'))
+   ->>'eligible')::boolean,
+  true,
+  'calculate_foreclosure: a seven-month-old loan is eligible'
+);
+select is(
+  (public.calculate_foreclosure((select l.id from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-2'))
+   ->>'eligible')::boolean,
+  false,
+  'calculate_foreclosure: a three-month-old loan is not eligible'
+);
+select is(
+  (public.calculate_foreclosure((select l.id from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-2'))
+   ->>'eligible_from')::date,
+  (current_date - interval '3 months' + interval '6 months')::date,
+  'calculate_foreclosure: reports the date it becomes eligible'
+);
+
+-- Rs 50,000 principal over 12 x Rs 5,000 = Rs 10,000 total interest. Nothing
+-- paid, so all 12 months remain: waiver Rs 10,000, charge Rs 1,000,
+-- payable = (60,000 - 10,000) + 1,000 = Rs 51,000.
+select is(
+  (public.calculate_foreclosure((select l.id from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-1'))
+   ->>'final_payable_paise')::bigint,
+  5100000::bigint,
+  'calculate_foreclosure: final payable is outstanding - waiver + bank charge'
+);
+
+-- ---- record_foreclosure is admin-only and re-checks the rule --------------
+select throws_like(
+  format($$ select public.record_foreclosure(%L::jsonb) $$,
+    jsonb_build_object('loan_id', (select l.id from public.loans l
+      join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-1'))::text),
+  '%Only an admin%',
+  'record_foreclosure: an employee cannot record a foreclosure'
+);
+
+select set_config('request.jwt.claims', '{"sub":"dddddddd-dddd-dddd-dddd-dddddddddddd","role":"authenticated"}', true);
+
+select throws_like(
+  format($$ select public.record_foreclosure(%L::jsonb) $$,
+    jsonb_build_object('loan_id', (select l.id from public.loans l
+      join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-2'))::text),
+  '%six months%',
+  'record_foreclosure: the six-month rule is enforced server-side, not just on the button'
+);
+select lives_ok(
+  format($$ select public.record_foreclosure(%L::jsonb) $$,
+    jsonb_build_object('loan_id', (select l.id from public.loans l
+      join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-1'))::text),
+  'record_foreclosure: an admin can record an eligible foreclosure'
+);
+select throws_like(
+  format($$ select public.record_foreclosure(%L::jsonb) $$,
+    jsonb_build_object('loan_id', (select l.id from public.loans l
+      join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-1'))::text),
+  '%already has an unpaid%',
+  'record_foreclosure: a second open quote on the same loan is rejected'
+);
+select is(
+  (select f.final_payable_paise from public.foreclosures f
+     join public.loans l on l.id = f.loan_id
+     join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-1'),
+  5100000::bigint,
+  'record_foreclosure: the quote is snapshotted, not just the total'
+);
+
+-- ---- seizure: employee creates pending, admin approves (recording 7) -------
+select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated"}', true);
+select lives_ok(
+  format($$ select public.record_seizure(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer_id', (select id from public.customers where account_no = 'FORE-1'),
+      'amount_paise', 100000, 'notes', 'Towing charges')::text),
+  'record_seizure: an employee can create a seizure'
+);
+select is(
+  (select s.status::text from public.seizures s
+     join public.customers c on c.id = s.customer_id where c.account_no = 'FORE-1'),
+  'pending',
+  'record_seizure: an employee-created seizure lands pending'
+);
+select throws_like(
+  format($$ select public.record_seizure(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer_id', (select id from public.customers where account_no = 'FORE-1'),
+      'amount_paise', 100000)::text),
+  '%already under seizure%',
+  'record_seizure: a customer cannot be seized twice at once'
+);
+select throws_like(
+  format($$ select public.approve_seizure(%L::jsonb) $$,
+    jsonb_build_object('seizure_id', (select s.id from public.seizures s
+      join public.customers c on c.id = s.customer_id where c.account_no = 'FORE-1'))::text),
+  '%Only an admin%',
+  'approve_seizure: an employee cannot approve'
+);
+select throws_like(
+  format($$ select public.exit_seizure(%L::jsonb) $$,
+    jsonb_build_object('seizure_id', (select s.id from public.seizures s
+      join public.customers c on c.id = s.customer_id where c.account_no = 'FORE-1'))::text),
+  '%Only an admin%',
+  'exit_seizure: an employee cannot remove a customer from seizing (recording 9)'
+);
+
+select set_config('request.jwt.claims', '{"sub":"dddddddd-dddd-dddd-dddd-dddddddddddd","role":"authenticated"}', true);
+select lives_ok(
+  format($$ select public.approve_seizure(%L::jsonb) $$,
+    jsonb_build_object(
+      'seizure_id', (select s.id from public.seizures s
+        join public.customers c on c.id = s.customer_id where c.account_no = 'FORE-1'),
+      'amount_paise', 120000)::text),
+  'approve_seizure: an admin approves and may correct the amount'
+);
+select is(
+  (select s.status::text from public.seizures s
+     join public.customers c on c.id = s.customer_id where c.account_no = 'FORE-1'),
+  'active',
+  'approve_seizure: the seizure becomes active'
+);
+
+-- ---- exit_seizure refuses while anything is outstanding (recording 8) ------
+select throws_like(
+  format($$ select public.exit_seizure(%L::jsonb) $$,
+    jsonb_build_object('seizure_id', (select s.id from public.seizures s
+      join public.customers c on c.id = s.customer_id where c.account_no = 'FORE-1'))::text),
+  '%arrears%',
+  'exit_seizure: refused while EMI arrears remain'
+);
+
+-- ---- the happy path: everything paid on time, nothing outstanding ---------
+select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","role":"authenticated"}', true);
+select lives_ok(
+  format($$ select public.create_customer(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer', jsonb_build_object('account_no','FORE-3','first_name','Cleared','bank_id','33333333-3333-3333-3333-333333333333'),
+      'loan', jsonb_build_object('principal_paise',5000000,'emi_paise',500000,'tenure_months',12,
+                                 'purchase_date',(current_date - interval '7 months')::text)
+    )::text),
+  'create_customer: seeds the cleared-up fixture'
+);
+
+-- Seven instalments, each paid ON its own due date, so no month was ever late
+-- and accrue_penalties will charge nothing. Seeded raw to control paid_at.
+set session_replication_role = replica;
+insert into public.payments (loan_id, amount_paise, mode, branch_id, paid_at, invoice_no)
+  select (select l.id from public.loans l
+            join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-3'),
+         500000, 'cash', '22222222-2222-2222-2222-222222222222',
+         (current_date - interval '6 months' + make_interval(months => g - 1)),
+         'SEED-' || lpad(g::text, 6, '0')
+    from generate_series(1, 7) g;
+set session_replication_role = origin;
+
+select is(
+  (select emi_overdue_paise from public.loan_balances lb
+     join public.customers c on c.id = lb.customer_id where c.account_no = 'FORE-3'),
+  0::bigint,
+  'the cleared fixture has no EMI arrears'
+);
+select is(
+  public.accrue_penalties((select l.id from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-3')),
+  0,
+  'accrue_penalties: paying every month on time charges no penalty'
+);
+
+select set_config('request.jwt.claims', '{"sub":"dddddddd-dddd-dddd-dddd-dddddddddddd","role":"authenticated"}', true);
+select lives_ok(
+  format($$ select public.record_seizure(%L::jsonb) $$,
+    jsonb_build_object(
+      'customer_id', (select id from public.customers where account_no = 'FORE-3'),
+      'amount_paise', 80000, 'approve', true)::text),
+  'record_seizure: an admin may approve inline'
+);
+select lives_ok(
+  format($$ select public.exit_seizure(%L::jsonb) $$,
+    jsonb_build_object(
+      'seizure_id', (select s.id from public.seizures s
+        join public.customers c on c.id = s.customer_id where c.account_no = 'FORE-3'),
+      'exit_reason', 'Cleared everything')::text),
+  'exit_seizure: allowed once nothing is outstanding'
+);
+select is(
+  (select s.status::text from public.seizures s
+     join public.customers c on c.id = s.customer_id where c.account_no = 'FORE-3'),
+  'resolved',
+  'exit_seizure: the seizure resolves'
+);
+select isnt(
+  (select s.exited_at from public.seizures s
+     join public.customers c on c.id = s.customer_id where c.account_no = 'FORE-3'),
+  null,
+  'exit_seizure: exited_at separates a release from any other resolution'
+);
+
+-- ---- settle_foreclosure closes the loan -----------------------------------
+select lives_ok(
+  format($$ select public.settle_foreclosure(%L::jsonb) $$,
+    jsonb_build_object(
+      'foreclosure_id', (select f.id from public.foreclosures f
+        join public.loans l on l.id = f.loan_id
+        join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-1'),
+      'noc_issued', true)::text),
+  'settle_foreclosure: an admin marks the quote paid'
+);
+select is(
+  (select l.status::text from public.loans l
+     join public.customers c on c.id = l.customer_id where c.account_no = 'FORE-1'),
+  'foreclosed',
+  'settle_foreclosure: the loan closes as foreclosed'
+);
+
+-- ---- the lookup behind the page -------------------------------------------
+select is(
+  (public.closure_lookup((select id from public.customers where account_no = 'FORE-3'))
+   ->'customer'->>'account_no'),
+  'FORE-3',
+  'closure_lookup: returns the customer the page searched for'
+);
+select isnt(
+  (public.closure_lookup((select id from public.customers where account_no = 'FORE-3'))
+   ->'foreclosure_quote'),
+  null,
+  'closure_lookup: carries the foreclosure quote for the screen'
+);
+select is(
+  (select count(*)::int from public.seized_customers()),
+  1,
+  'seized_customers: lists only the still-open seizures'
 );
 
 select * from finish();

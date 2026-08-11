@@ -19,6 +19,8 @@ import {
   advancePaise,
   penaltyBalancePaise,
   splitReceipt,
+  foreclosureEligibleFrom,
+  isForeclosureEligible,
 } from "./loan-status";
 
 const d = parseISODate;
@@ -254,6 +256,23 @@ describe("splitReceipt (penalty first, then instalment)", () => {
       towardsPenaltyPaise: 0,
       towardsEmiPaise: 0,
     });
+  });
+});
+
+describe("foreclosure eligibility (six months from the loan start)", () => {
+  it("opens exactly six months after the start date", () => {
+    expect(toISODate(foreclosureEligibleFrom("2026-02-15"))).toBe("2026-08-15");
+  });
+  it("clamps to the end of a shorter month, like Postgres", () => {
+    expect(toISODate(foreclosureEligibleFrom("2025-08-31"))).toBe("2026-02-28");
+  });
+  it("is false the day before and true on the day itself", () => {
+    expect(isForeclosureEligible("2026-02-15", d("2026-08-14"))).toBe(false);
+    expect(isForeclosureEligible("2026-02-15", d("2026-08-15"))).toBe(true);
+    expect(isForeclosureEligible("2026-02-15", d("2027-01-01"))).toBe(true);
+  });
+  it("is false without a start date", () => {
+    expect(isForeclosureEligible("", d("2026-08-15"))).toBe(false);
   });
 });
 

@@ -81,6 +81,10 @@ is implicit, represented by the `owner`.
 - `app/dashboard/customers/[id]/print/page.tsx` — A4 customer statement
 - `app/dashboard/customers/[id]/receipt/[paymentId]/page.tsx` — printable EMI
   receipt (`latest` is accepted in place of a payment id)
+- `app/dashboard/foreclosure/{page,actions}.tsx` — Foreclosure & Seizing:
+  search by loan/account number, the 6-month-gated foreclosure quote, and the
+  seizure lifecycle (add → approve → exit). Employees may create a `pending`
+  seizure; every other write is admin-only, enforced in the RPCs
 - `app/api/*` — thin route handlers (Node runtime) — added in Phases 4–7
 - `lib/supabase/server.ts` — `createSupabaseServerClient()` (anon, cookie-aware via `@supabase/ssr`)
 - `lib/supabase/client.ts` — browser client
@@ -152,7 +156,7 @@ Still defaulted: 2-day grace (#7) — swappable per loan without schema change.
       edit/waive, the `loan_balances` read model, remarks, and the full money
       breakdown on the printed receipt. `accrue_penalties_all()` is ready for
       pg_cron — the schedule itself still needs the extension enabled.
-- [ ] **Phase 4.95** — Client feedback round 3, slice B: the Foreclosure & Seizing
+- [x] **Phase 4.95** — Client feedback round 3, slice B: the Foreclosure & Seizing
       page (6-month eligibility, Add Foreclosure / Add Seizing / Exit Seizing)
 - [ ] **Phase 5** — Bank recovery + daily summary + 0/1/3/5 pending list
 - [ ] **Phase 6** — OTP gating + sub-ID monitoring + audit log viewer + soft-delete recovery + docs/keys

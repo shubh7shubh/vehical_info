@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import {
   AlertCircle,
   Banknote,
+  Gavel,
   IndianRupee,
   Receipt,
   Users,
@@ -44,6 +45,13 @@ const tiles = [
     desc: "Filter by 0 / 1 / 3 / 5 / Below 3 / Above 5 overdue installments",
     Icon: AlertCircle,
     accent: "bg-warning-soft text-warning",
+  },
+  {
+    href: "/dashboard/foreclosure",
+    title: "Foreclosure & Seizing",
+    desc: "Close a loan early, or record and release a seized vehicle",
+    Icon: Gavel,
+    accent: "bg-danger-soft text-danger",
   },
   {
     href: "/dashboard/recovery",
