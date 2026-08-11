@@ -666,12 +666,51 @@ partial-payment allocation, the penalty-only receipt, `payment_receipt`'s new
 keys, admin-vs-employee-vs-owner gating on `set_penalty_charge` / `amend_payment`,
 and `void_payment` leaving a soft-deleted row out of the balances.
 
-> **No Node on the machine?** The suites need it. As a fallback you can replay the
-> migrations and run pgTAP straight against a container:
-> `docker run -d --name pgcheck -e POSTGRES_PASSWORD=postgres public.ecr.aws/supabase/postgres:17.6.1.127`,
-> stub `auth.users` + `auth.uid()` (reading `request.jwt.claims`) and the
-> `anon`/`authenticated`/`service_role` roles, then pipe each migration and
-> `supabase/tests/ledger_test.sql` through `psql -U supabase_admin`.
+### No Node on the machine? Verify through Docker
+
+Both suites normally need Node. If it is missing (or broken), all three checks can
+still be run against containers — this is how this phase was verified.
+
+**pgTAP.** Start the same Postgres image the CLI uses, wait for init to finish
+(the log prints "ready to accept connections" **twice**), stub what the Supabase
+platform normally provides, then pipe each migration and the test file through:
+
+```bash
+docker run -d --name pgcheck -e POSTGRES_PASSWORD=postgres \
+  public.ecr.aws/supabase/postgres:17.6.1.127
+# stubs: pgcrypto, pg_trgm, pgtap; schema auth + auth.users;
+#        auth.uid() reading request.jwt.claims; roles anon/authenticated/service_role
+for f in supabase/migrations/*.sql; do
+  docker exec -i -u postgres pgcheck psql -U supabase_admin -d postgres \
+    -v ON_ERROR_STOP=1 -q < "$f" || echo "FAILED $f"
+done
+docker exec -i -u postgres pgcheck psql -U supabase_admin -d postgres -q \
+  < supabase/tests/ledger_test.sql
+```
+
+> The stub `auth.uid()` **must** read `request.jwt.claims` — a version that
+> returns NULL makes every RPC test fail with "Not authorized" and looks like a
+> code bug.
+
+**tsc and Vitest.** `tsc` is pure JS and runs straight off the mounted
+`node_modules`. Vitest additionally needs Linux builds of rollup and esbuild,
+which a Windows install does not have — side-load them **at the exact versions in
+`node_modules`** (a mismatch fails with "Host version does not match binary
+version") rather than writing into the project:
+
+```bash
+docker run --rm -v "//c/path/to/banking-app:/app" -w /app node:22-alpine \
+  node node_modules/typescript/bin/tsc --noEmit
+
+docker run --rm -v "//c/path/to/banking-app:/app" -w /app node:22-alpine sh -c "
+  npm i --prefix /tmp/fix @rollup/rollup-linux-x64-musl@<ver> @esbuild/linux-x64@<ver>
+  export NODE_PATH=/tmp/fix/node_modules
+  export ESBUILD_BINARY_PATH=/tmp/fix/node_modules/@esbuild/linux-x64/bin/esbuild
+  node node_modules/vitest/vitest.mjs run"
+```
+
+ESLint does **not** survive this route — it dies with `EIO: i/o error` reading
+through a OneDrive bind mount. Run `npm run lint` on a machine with Node.
 
 ---
 
