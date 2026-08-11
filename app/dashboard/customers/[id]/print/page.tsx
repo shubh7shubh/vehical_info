@@ -3,12 +3,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatINR } from "@/lib/utils";
-import {
-  monthsBehind,
-  nextDueDate,
-  remainingInstallments,
-  resolveFirstEmi,
-} from "@/lib/loan-status";
+import { resolveFirstEmi } from "@/lib/loan-status";
 import { PrintButton } from "@/components/print-button";
 
 /**
@@ -78,8 +73,28 @@ type Payment = {
   month_no: number | null;
   receipt_no: string | null;
   invoice_no: string | null;
+  remark: string | null;
   signature: boolean;
   paid_at: string;
+};
+
+/** One row of the `loan_balances` view — the canonical money read model. */
+type LoanBalances = {
+  emi_collected_paise: number;
+  penalty_collected_paise: number;
+  penalty_charged_paise: number;
+  installments_settled: number;
+  installments_pending: number;
+  months_behind: number;
+  emi_overdue_paise: number;
+  emi_remaining_paise: number;
+  advance_paise: number;
+  penalty_balance_paise: number;
+  pending_month_no: number | null;
+  pending_month_balance_paise: number;
+  outstanding_paise: number;
+  loan_balance_paise: number;
+  next_due_date: string | null;
 };
 
 function fmtDate(d: string | null | undefined): string {
@@ -144,16 +159,25 @@ export default async function CustomerStatementPage({
   const loan = loans.find((l) => l.status === "active") ?? loans[0] ?? null;
 
   let payments: Payment[] = [];
+  let balances: LoanBalances | null = null;
   if (loan) {
     const { data: pdata } = await supabase
       .from("payments")
       .select(
-        "id, amount_paise, penalty_paise, mode, month_no, receipt_no, invoice_no, signature, paid_at",
+        "id, amount_paise, penalty_paise, mode, month_no, receipt_no, invoice_no, remark, signature, paid_at",
       )
       .eq("loan_id", loan.id)
+      .is("deleted_at", null)
       .order("paid_at", { ascending: true })
       .returns<Payment[]>();
     payments = pdata ?? [];
+
+    const { data: bdata } = await supabase
+      .from("loan_balances")
+      .select("*")
+      .eq("loan_id", loan.id)
+      .maybeSingle();
+    balances = (bdata as LoanBalances | null) ?? null;
   }
 
   const fullName = [customer.first_name, customer.middle_name, customer.last_name]
@@ -169,17 +193,14 @@ export default async function CustomerStatementPage({
       .filter(Boolean)
       .join(", ") || "—";
 
-  const paidCount = payments.length;
+  // Money is counted, not rows — see the loan_balances view.
+  const paidCount = balances?.installments_settled ?? 0;
   const firstEmi = loan
     ? resolveFirstEmi(customer.purchase_date, loan.first_emi_date)
     : null;
-  const pending = loan ? remainingInstallments(loan.tenure_months, paidCount) : 0;
-  const behind =
-    loan && firstEmi
-      ? monthsBehind(firstEmi, new Date(), loan.tenure_months, paidCount)
-      : 0;
-  const nextDue =
-    loan && firstEmi ? nextDueDate(firstEmi, paidCount, loan.tenure_months) : null;
+  const pending = balances?.installments_pending ?? 0;
+  const behind = balances?.months_behind ?? 0;
+  const nextDue = balances?.next_due_date ? new Date(balances.next_due_date) : null;
 
   const collectedInstallments = payments.reduce(
     (sum, p) => sum + p.amount_paise,
@@ -229,12 +250,30 @@ export default async function CustomerStatementPage({
       {loan ? (
         <section className="print-block grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
-            { label: "Installments paid", value: `${paidCount} of ${loan.tenure_months}` },
+            { label: "Instalments paid", value: `${paidCount} of ${loan.tenure_months}` },
             { label: "Pending", value: String(pending) },
             { label: "Months behind", value: String(behind) },
             {
               label: "Next due",
               value: nextDue ? nextDue.toLocaleDateString("en-IN") : "Loan complete",
+            },
+            {
+              label: balances?.pending_month_no
+                ? `Balance on EMI #${balances.pending_month_no}`
+                : "EMI balance",
+              value: formatINR(balances?.pending_month_balance_paise ?? 0),
+            },
+            {
+              label: "EMI overdue",
+              value: formatINR(balances?.emi_overdue_paise ?? 0),
+            },
+            {
+              label: "Penalty balance",
+              value: formatINR(balances?.penalty_balance_paise ?? 0),
+            },
+            {
+              label: "Total outstanding",
+              value: formatINR(balances?.loan_balance_paise ?? 0),
             },
           ].map((s) => (
             <div
@@ -326,21 +365,22 @@ export default async function CustomerStatementPage({
         </Block>
       </div>
 
-      <Block title="Installment ledger">
+      <Block title="Instalment ledger">
         {payments.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-[11px] print:min-w-0">
+            <table className="w-full min-w-[720px] text-[11px] print:min-w-0">
               <thead className="bg-surface-muted text-[10px] uppercase tracking-wider text-muted-foreground print:bg-white print:text-black">
                 <tr>
                   <th className="px-2 py-1.5 text-left">Sr</th>
                   <th className="px-2 py-1.5 text-left">Date</th>
                   <th className="px-2 py-1.5 text-left">Month</th>
-                  <th className="px-2 py-1.5 text-right">Installment</th>
+                  <th className="px-2 py-1.5 text-right">Instalment</th>
                   <th className="px-2 py-1.5 text-right">Penalty</th>
                   <th className="px-2 py-1.5 text-right">Total</th>
                   <th className="px-2 py-1.5 text-left">Mode</th>
-                  <th className="px-2 py-1.5 text-left">Invoice</th>
-                  <th className="px-2 py-1.5 text-left">Receipt</th>
+                  <th className="px-2 py-1.5 text-left">Receipt no.</th>
+                  <th className="px-2 py-1.5 text-left">Book no.</th>
+                  <th className="px-2 py-1.5 text-left">Remark</th>
                 </tr>
               </thead>
               <tbody>
@@ -364,6 +404,7 @@ export default async function CustomerStatementPage({
                     <td className="px-2 py-1 capitalize">{p.mode}</td>
                     <td className="px-2 py-1">{p.invoice_no ?? "—"}</td>
                     <td className="px-2 py-1">{p.receipt_no ?? "—"}</td>
+                    <td className="px-2 py-1">{p.remark ?? "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -381,7 +422,7 @@ export default async function CustomerStatementPage({
                   <td className="px-2 py-1.5 text-right tabular-nums">
                     {formatINR(collectedInstallments + collectedPenalty)}
                   </td>
-                  <td colSpan={3} />
+                  <td colSpan={4} />
                 </tr>
               </tfoot>
             </table>

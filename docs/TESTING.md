@@ -544,7 +544,143 @@ first-EMI derivation, `invoice_no`, historical `payment_receipt` counts and ever
 
 ---
 
-## Phase 5 — Bank Recovery + Daily Summary + Foreclosure + Seizure (planned)
+## Phase 4.9 — Partial Payments, the Penalty Ledger, Full Receipt Breakdown
+
+Client feedback round 3, slice A — recordings 1, 2, 3, 10, 11, 12, 13, 14, 15.
+
+### 0. Apply the migrations
+
+```bash
+npx supabase db reset          # local: replays all 20 migrations
+npx supabase db push           # remote
+```
+
+Four new files, in order: `20260812120000_payment_partials.sql`,
+`…120100_penalty_ledger.sql`, `…120200_loan_balances_view.sql`,
+`…120300_payment_rpcs_v3.sql`.
+
+### Simulating time (read this first)
+
+Same trick as Phase 4: back-date `purchase_date`. A customer bought 4 months ago
+has 4 instalments due and — after the 2-day grace on each — **3** accrued
+penalties, not 4. The newest due month is still inside its grace window. Getting
+this wrong is the most common source of "the penalty total looks off by ₹500".
+
+### 1. Money is counted, not rows
+
+Add a customer with a purchase date 4 months back, EMI ₹5,000, tenure 12. On the
+**EMI / Payments** tab:
+
+| Record | Expect |
+|---|---|
+| Amount received `3000` | split shows ₹1,500 penalty + ₹1,500 instalment; preview reads `0 of 12`, `Balance on EMI #1 ₹3,500` |
+| Then `3500` | now `1 of 12` — **two payment rows, one settled instalment** |
+
+This is the whole point of the round. Verify in SQL that nothing counts rows:
+
+```sql
+select installments_settled, emi_collected_paise, pending_month_no,
+       pending_month_balance_paise, penalty_balance_paise, loan_balance_paise
+  from public.loan_balances lb
+  join public.customers c on c.id = lb.customer_id
+ where c.account_no = '5001';
+```
+
+### 2. The split is editable, and its order lives in one place
+
+Typing in **Towards penalty** or **Towards instalment** rebalances the other so
+the two always sum to what was received; "Reset to automatic" restores it. The
+order (penalty first) is `splitReceipt()` in `lib/loan-status.ts` — flipping to
+EMI-first is a one-line change there and nowhere else.
+
+### 3. Penalty-only receipt
+
+The **Pay penalty only** panel appears only when `penalty_balance_paise > 0`.
+Recording one posts `installment_paise = 0`, which the old `log_payment` refused.
+
+| Attempt | Expected |
+|---|---|
+| penalty `500`, instalment `0` | recorded; `payment.kind = 'penalty'`, slip titled "Penalty Receipt" |
+| both `0` | rejected — *"Enter an installment amount, a penalty amount, or both"* |
+| the `payments_amount_or_penalty` CHECK | backstops any write that bypasses the RPC |
+
+### 4. The accrual engine
+
+`accrue_penalties(loan)` is idempotent and judges each month against the money
+received **by that month's own deadline**, never against today's balance — so a
+customer who catches up later keeps the charges they earned.
+
+```sql
+select public.accrue_penalties('<loan-id>');   -- returns rows created
+select public.accrue_penalties('<loan-id>');   -- 0 on the second call
+```
+
+It runs in three places: inside `log_payment` before the insert, from the
+customer card's read path (errors ignored — a penalty hiccup must not 500 the
+card), and via `accrue_penalties_all()`, which is the pg_cron entry point.
+
+> **Not yet scheduled.** pg_cron has to be enabled on the project first, then:
+> `select cron.schedule('penalty-sweep','15 19 * * *', $$select public.accrue_penalties_all()$$);`
+
+> **Known wrinkle:** a charge is never removed. Entering a *back-dated* payment
+> after accrual has already charged that month leaves the charge standing; an
+> admin waives it. Forward entry is unaffected.
+
+### 5. Admin-only penalty and receipt edits (recordings 10, 13)
+
+| Role | Penalty ledger edit / waive | `amend_payment` | `void_payment` |
+|---|---|---|---|
+| admin | ✅ | ✅ | ✅ |
+| employee | ❌ *"Only an admin…"* | ❌ | ❌ |
+| owner | ❌ (read-only at the DB layer) | ❌ | ❌ |
+
+The client said "Owner and Admin"; this ships as **admin-only** because the owner
+has no write policy on any operational table and `current_branch_id()` is NULL for
+it. Flipping that later means changing one role test per RPC and deriving the
+branch from the target row. Flagged for the client in the round-3 test sheet.
+
+### 6. Receipts stay historical
+
+Print the first receipt, record more payments, print it again — every figure must
+be unchanged. Ordering is `(paid_at, invoice_no, id)`: `paid_at` comes from a date
+input, so **every receipt taken on the same day shares one midnight timestamp**,
+and the old `(paid_at, id)` tie-break compared random UUIDs. That made "total paid
+today" non-deterministic. If you touch this ordering, change it in
+`payment_receipt()` **and** in `accrue_penalties()`'s running-total window.
+
+Check on the slip: first EMI date, EMI paid today, `Balance on EMI #n`, penalty
+paid, penalty balance, **Total paid today**, **Total outstanding**, remark — and
+still two A5 copies on one A4 with no app chrome.
+
+### 7. Automated coverage
+
+`npm test` → 54 Vitest cases. `npx supabase test db` → **74** pgTAP assertions.
+All 38 pre-existing assertions are unchanged and still pass — that is the
+regression proof that whole-EMI payers did not move reminder bucket, since
+`installments_settled == count(payments)` exactly when every payment is one EMI.
+
+New pgTAP groups: `installments_settled` / `pending_month_no` /
+`pending_month_shortfall`, accrual idempotency, a charge surviving catch-up,
+partial-payment allocation, the penalty-only receipt, `payment_receipt`'s new
+keys, admin-vs-employee-vs-owner gating on `set_penalty_charge` / `amend_payment`,
+and `void_payment` leaving a soft-deleted row out of the balances.
+
+> **No Node on the machine?** The suites need it. As a fallback you can replay the
+> migrations and run pgTAP straight against a container:
+> `docker run -d --name pgcheck -e POSTGRES_PASSWORD=postgres public.ecr.aws/supabase/postgres:17.6.1.127`,
+> stub `auth.users` + `auth.uid()` (reading `request.jwt.claims`) and the
+> `anon`/`authenticated`/`service_role` roles, then pipe each migration and
+> `supabase/tests/ledger_test.sql` through `psql -U supabase_admin`.
+
+---
+
+## Phase 4.95 — Foreclosure & Seizing page (planned)
+
+> Client feedback round 3, slice B — recordings 4–9. To be filled in once it ships.
+
+---
+
+## Phase 5 — Bank Recovery + Daily Summary + Pending List (planned)
 
 > To be filled in once Phase 5 ships.
 

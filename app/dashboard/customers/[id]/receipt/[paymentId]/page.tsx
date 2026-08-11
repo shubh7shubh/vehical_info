@@ -6,13 +6,22 @@ import { formatINR } from "@/lib/utils";
 import { PrintButton } from "@/components/print-button";
 
 /**
- * The printable EMI receipt (client request #1 and #4: "an invoice should be
- * printable for every EMI payment" and "the printout should show how many EMIs
- * are still pending").
+ * The printable EMI receipt.
  *
  * One A4 sheet carries two identical A5 halves — Office Copy and Customer Copy —
  * so it prints on the ordinary printer the branch already owns. All app chrome
  * is hidden behind Tailwind's `print:` variant.
+ *
+ * Round 2 asked for the receipt itself and a pending count. Round 3 asked for the
+ * whole money picture on it:
+ *   recording  1  the first EMI date
+ *   recording 12  the total outstanding balance and the total taken today
+ *   recording 15  EMI paid today, what is still short on that EMI and against
+ *                 which month, penalty paid today, penalty still owed
+ *
+ * Every figure comes from `payment_receipt()` computed AS OF this payment, so
+ * reprinting an old slip reproduces it exactly — a receipt is a historical
+ * document, not a live balance sheet.
  *
  * `paymentId` may be the literal "latest", which is what the "Invoice Print"
  * button on the customer card uses.
@@ -45,11 +54,13 @@ type Receipt = {
     tenure_months: number;
     first_emi_date: string | null;
     due_day: number;
+    started_at: string | null;
   };
   payment: {
     id: string;
     invoice_no: string | null;
     receipt_no: string | null;
+    remark: string | null;
     month_no: number | null;
     amount_paise: number;
     penalty_paise: number;
@@ -57,10 +68,30 @@ type Receipt = {
     mode: string;
     signature: boolean;
     paid_at: string;
+    kind: "emi" | "penalty" | "emi_penalty";
   };
+  emi_paid_today_paise: number;
+  penalty_paid_today_paise: number;
+  total_paid_today_paise: number;
+  emi_collected_paise: number;
+  emi_overdue_paise: number;
+  pending_month_no: number | null;
+  pending_month_balance_paise: number;
+  penalty_charged_paise: number;
+  penalty_collected_paise: number;
+  penalty_balance_paise: number;
+  advance_paise: number;
+  outstanding_paise: number;
+  loan_balance_paise: number;
   paid_count: number;
   pending_count: number;
   next_due_date: string | null;
+};
+
+const RECEIPT_TITLE: Record<Receipt["payment"]["kind"], string> = {
+  emi: "EMI Receipt",
+  penalty: "Penalty Receipt",
+  emi_penalty: "EMI + Penalty Receipt",
 };
 
 function fmtDate(d: string | null): string {
@@ -119,18 +150,18 @@ function Slip({ r, copy }: { r: Receipt; copy: string }) {
 
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border py-2 print:border-black">
         <div className="text-sm font-bold uppercase tracking-wide">
-          EMI Receipt
+          {RECEIPT_TITLE[r.payment.kind] ?? "EMI Receipt"}
         </div>
         <div className="text-right text-[11px]">
           <div>
-            Invoice{" "}
+            Receipt No.{" "}
             <strong className="tabular-nums">
               {r.payment.invoice_no ?? "—"}
             </strong>
           </div>
           {r.payment.receipt_no ? (
             <div className="text-muted-foreground print:text-black">
-              Receipt book no. {r.payment.receipt_no}
+              Book no. {r.payment.receipt_no}
             </div>
           ) : null}
         </div>
@@ -148,32 +179,58 @@ function Slip({ r, copy }: { r: Receipt; copy: string }) {
           {mobiles ? `${mobiles}` : ""}
           {r.customer.model_no ? `${mobiles ? " · " : ""}${r.customer.model_no}` : ""}
         </div>
+        {/* Recording 1 — the first EMI date belongs on the slip. */}
+        <div className="mt-0.5 text-muted-foreground print:text-black">
+          Date {fmtDate(r.payment.paid_at)} · EMI {formatINR(r.loan.emi_paise)}{" "}
+          · First EMI {fmtDate(r.loan.first_emi_date)}
+        </div>
       </div>
 
-      <div className="border-b border-border py-2 print:border-black">
-        <Row
-          label={
-            r.payment.month_no
-              ? `Installment no. ${r.payment.month_no}`
-              : "Installment"
-          }
-          value={fmtDate(r.payment.paid_at)}
-        />
-        <Row label="Installment amount" value={formatINR(r.payment.amount_paise)} />
-        <Row
-          label="Penalty"
-          value={
-            r.payment.penalty_paise ? formatINR(r.payment.penalty_paise) : "—"
-          }
-        />
-        <Row
-          label={`Total paid (${r.payment.mode})`}
-          value={formatINR(r.payment.total_paise)}
-          strong
-        />
+      {/* Recordings 12 and 15 — the full breakdown, in two columns so both A5
+          halves still fit on one A4 sheet. */}
+      <div className="grid grid-cols-2 gap-x-4 border-b border-border py-2 print:border-black">
+        <div>
+          <Row
+            label={
+              r.pending_month_no
+                ? `Instalment no. ${r.payment.month_no ?? r.pending_month_no}`
+                : "Instalment"
+            }
+            value={formatINR(r.emi_paid_today_paise)}
+          />
+          <Row
+            label={
+              r.pending_month_no
+                ? `Balance on EMI #${r.pending_month_no}`
+                : "Loan complete"
+            }
+            value={
+              r.pending_month_no
+                ? formatINR(r.pending_month_balance_paise)
+                : "—"
+            }
+          />
+          <Row
+            label={`Total paid today (${r.payment.mode})`}
+            value={formatINR(r.total_paid_today_paise)}
+            strong
+          />
+        </div>
+        <div>
+          <Row label="Penalty paid" value={formatINR(r.penalty_paid_today_paise)} />
+          <Row
+            label="Penalty balance"
+            value={formatINR(r.penalty_balance_paise)}
+          />
+          <Row
+            label="Total outstanding"
+            value={formatINR(r.loan_balance_paise)}
+            strong
+          />
+        </div>
       </div>
 
-      {/* The line the client specifically asked for. */}
+      {/* The line the client specifically asked for in round 2. */}
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border py-2 text-[12px] print:border-black">
         <span>
           Paid <strong>{r.paid_count}</strong> of{" "}
@@ -187,7 +244,19 @@ function Slip({ r, copy }: { r: Receipt; copy: string }) {
         </span>
       </div>
 
-      <div className="flex items-end justify-between gap-6 pt-6 text-[11px]">
+      {r.advance_paise > 0 ? (
+        <div className="py-1 text-[11px] font-semibold">
+          Advance held {formatINR(r.advance_paise)}
+        </div>
+      ) : null}
+
+      {r.payment.remark ? (
+        <div className="py-1 text-[11px] text-muted-foreground print:text-black">
+          Remark: {r.payment.remark}
+        </div>
+      ) : null}
+
+      <div className="flex items-end justify-between gap-6 pt-5 text-[11px]">
         <div className="flex-1 border-t border-border pt-1 print:border-black">
           Received by
         </div>
@@ -216,6 +285,7 @@ export default async function ReceiptPage({
       .from("payments")
       .select("id, paid_at, loans!inner(customer_id)")
       .eq("loans.customer_id", id)
+      .is("deleted_at", null)
       .order("paid_at", { ascending: false })
       .limit(1)
       .maybeSingle();

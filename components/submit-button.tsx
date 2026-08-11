@@ -9,6 +9,10 @@ type Props = {
   disabled?: boolean;
   formAction?: (formData: FormData) => void | Promise<void>;
   title?: string;
+  /** Submitted with the form, so one form can carry several submit buttons
+   *  (e.g. Save vs Waive on a penalty ledger row). */
+  name?: string;
+  value?: string;
 };
 
 export function SubmitButton({
@@ -18,6 +22,8 @@ export function SubmitButton({
   disabled,
   formAction,
   title,
+  name,
+  value,
 }: Props) {
   const { pending } = useFormStatus();
   return (
@@ -26,6 +32,8 @@ export function SubmitButton({
       formAction={formAction}
       disabled={disabled || pending}
       title={title}
+      name={name}
+      value={value}
       aria-busy={pending}
       className={className}
     >

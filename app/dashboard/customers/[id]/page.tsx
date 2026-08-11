@@ -12,17 +12,17 @@ import {
 import { requireUser } from "@/lib/auth/current-user";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatINR } from "@/lib/utils";
-import {
-  categorize,
-  monthsBehind,
-  nextDueDate,
-  remainingInstallments,
-  resolveFirstEmi,
-  suggestedPenaltyPaise,
-} from "@/lib/loan-status";
+import { categorize, resolveFirstEmi } from "@/lib/loan-status";
 import { StatusBadge } from "@/components/status-counts";
 import { SubmitButton } from "@/components/submit-button";
-import { logPaymentAction, addFollowupAction } from "./actions";
+import { PaymentEntryForm } from "@/components/payment-entry-form";
+import {
+  logPaymentAction,
+  addFollowupAction,
+  setPenaltyChargeAction,
+  amendPaymentAction,
+  voidPaymentAction,
+} from "./actions";
 
 type OneOrMany<T> = T | T[] | null;
 function one<T>(v: OneOrMany<T>): T | null {
@@ -86,6 +86,7 @@ type Payment = {
   month_no: number | null;
   receipt_no: string | null;
   invoice_no: string | null;
+  remark: string | null;
   signature: boolean;
   paid_at: string;
 };
@@ -93,6 +94,36 @@ type Followup = {
   id: string;
   note: string;
   created_at: string;
+};
+/** One row of the `loan_balances` view — the canonical money read model. */
+type LoanBalances = {
+  emi_collected_paise: number;
+  penalty_collected_paise: number;
+  penalty_charged_paise: number;
+  installments_due: number;
+  installments_settled: number;
+  installments_pending: number;
+  months_behind: number;
+  emi_overdue_paise: number;
+  emi_remaining_paise: number;
+  advance_paise: number;
+  penalty_balance_paise: number;
+  pending_month_no: number | null;
+  pending_month_balance_paise: number;
+  outstanding_paise: number;
+  loan_balance_paise: number;
+  next_due_date: string | null;
+};
+/** A row of the penalty ledger (public.penalties). */
+type PenaltyCharge = {
+  id: string;
+  month_no: number | null;
+  period_start: string;
+  period_end: string;
+  amount_paise: number;
+  source: string;
+  note: string | null;
+  waived_at: string | null;
 };
 
 const TABS = [
@@ -113,8 +144,6 @@ const penaltyLabel: Record<string, string> = {
 
 const input =
   "w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-base outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 sm:text-sm";
-const inputLabel =
-  "mb-1 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground";
 
 function fmtDate(d: string | null): string {
   return d ? new Date(d).toLocaleDateString("en-IN") : "—";
@@ -157,6 +186,30 @@ function Panel({
 
 function Empty({ text }: { text: string }) {
   return <p className="py-2 text-sm text-muted-foreground">{text}</p>;
+}
+
+/** One figure in the balances strip on the EMI tab. */
+function Money({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div>
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </dt>
+      <dd
+        className={`tabular-nums ${strong ? "text-base font-bold" : "text-sm font-medium"}`}
+      >
+        {value}
+      </dd>
+    </div>
+  );
 }
 
 export default async function CustomerCardPage({
@@ -206,18 +259,48 @@ export default async function CustomerCardPage({
   const engineMissing =
     !vehicle || !vehicle.engine_no_1 || vehicle.engine_no_1.trim() === "";
 
+  // Bring the penalty ledger up to date before reading balances, so a customer
+  // who has not paid in months still shows the penalty they have accrued rather
+  // than waiting for the next collection or the nightly sweep. Idempotent, and a
+  // no-op for read-only roles (the owner never triggers a write). Deliberately
+  // ignoring the error: a penalty-engine hiccup must not 500 the customer card.
+  if (activeLoan) {
+    await supabase.rpc("accrue_penalties", { p_loan_id: activeLoan.id });
+  }
+
   // Payments + follow-ups for the installment registry.
   let payments: Payment[] = [];
+  let balances: LoanBalances | null = null;
+  let penaltyCharges: PenaltyCharge[] = [];
   if (activeLoan) {
     const { data: pdata } = await supabase
       .from("payments")
       .select(
-        "id, amount_paise, penalty_paise, mode, month_no, receipt_no, invoice_no, signature, paid_at",
+        "id, amount_paise, penalty_paise, mode, month_no, receipt_no, invoice_no, remark, signature, paid_at",
       )
       .eq("loan_id", activeLoan.id)
+      .is("deleted_at", null)
       .order("paid_at", { ascending: true })
       .returns<Payment[]>();
     payments = pdata ?? [];
+
+    // The one place loan money is computed (see the loan_balances view).
+    const { data: bdata } = await supabase
+      .from("loan_balances")
+      .select("*")
+      .eq("loan_id", activeLoan.id)
+      .maybeSingle();
+    balances = (bdata as LoanBalances | null) ?? null;
+
+    const { data: cdata } = await supabase
+      .from("penalties")
+      .select(
+        "id, month_no, period_start, period_end, amount_paise, source, note, waived_at",
+      )
+      .eq("loan_id", activeLoan.id)
+      .order("period_start", { ascending: true })
+      .returns<PenaltyCharge[]>();
+    penaltyCharges = cdata ?? [];
   }
   const { data: fData } = await supabase
     .from("followups")
@@ -227,39 +310,22 @@ export default async function CustomerCardPage({
     .returns<Followup[]>();
   const followups = fData ?? [];
 
-  const paidCount = payments.length;
+  // Money is counted, not rows: two half-EMIs are one settled installment.
+  const paidCount = balances?.installments_settled ?? 0;
   // The schedule is anchored on the first EMI date (falls back to purchase + 1
   // month for records created before Phase 4.5) — same rule as the DB.
   const firstEmi = activeLoan
     ? resolveFirstEmi(customer.purchase_date, activeLoan.first_emi_date)
     : null;
-  const behind =
-    activeLoan && firstEmi
-      ? monthsBehind(
-          firstEmi,
-          new Date(),
-          activeLoan.tenure_months,
-          paidCount,
-        )
-      : 0;
+  const behind = balances?.months_behind ?? 0;
   const color = activeLoan && firstEmi ? categorize(behind) : null;
-  const pendingCount = activeLoan
-    ? remainingInstallments(activeLoan.tenure_months, paidCount)
-    : 0;
-  const nextDue =
-    activeLoan && firstEmi
-      ? nextDueDate(firstEmi, paidCount, activeLoan.tenure_months)
-      : null;
-  // Client: "penalty should be monthly Rs 500". Pre-fill one slab per month
-  // behind — the employee can still edit it or set 0 to waive.
-  const suggestedPenalty = activeLoan
-    ? suggestedPenaltyPaise(
-        behind,
-        activeLoan.penalty_type,
-        activeLoan.penalty_rate_paise,
-      )
-    : 0;
+  const pendingCount = balances?.installments_pending ?? 0;
+  const nextDue = balances?.next_due_date
+    ? new Date(balances.next_due_date)
+    : null;
+  const penaltyBalance = balances?.penalty_balance_paise ?? 0;
   const canEdit = me.role === "admin" || me.role === "employee";
+  const isAdmin = me.role === "admin";
   const place =
     [customer.address_village, customer.address_taluka, customer.address_district]
       .filter(Boolean)
@@ -525,140 +591,217 @@ export default async function CustomerCardPage({
                   ) : null}
                 </div>
 
-                <form
-                  action={logPaymentAction}
-                  className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"
-                >
-                  <input type="hidden" name="customer_id" value={customer.id} />
-                  <div>
-                    <label htmlFor="month_no" className={inputLabel}>
-                      Month #
-                    </label>
-                    <input
-                      id="month_no"
-                      name="month_no"
-                      type="number"
-                      min={1}
-                      max={activeLoan.tenure_months}
-                      defaultValue={paidCount + 1}
-                      inputMode="numeric"
-                      className={input}
+                {/* Recordings 11/12/14 — what the customer owes, at a glance. */}
+                {balances ? (
+                  <dl className="mb-4 grid grid-cols-2 gap-3 rounded-xl border border-border bg-surface-muted p-3 sm:grid-cols-4">
+                    <Money
+                      label={
+                        balances.pending_month_no
+                          ? `Balance on EMI #${balances.pending_month_no}`
+                          : "Loan complete"
+                      }
+                      value={
+                        balances.pending_month_no
+                          ? formatINR(balances.pending_month_balance_paise)
+                          : "—"
+                      }
                     />
-                  </div>
-                  <div>
-                    <label htmlFor="paid_at" className={inputLabel}>
-                      Date *
-                    </label>
-                    <input
-                      id="paid_at"
-                      name="paid_at"
-                      type="date"
-                      required
-                      defaultValue={new Date().toISOString().slice(0, 10)}
-                      className={input}
+                    <Money
+                      label="EMI overdue"
+                      value={formatINR(balances.emi_overdue_paise)}
                     />
-                  </div>
-                  <div>
-                    <label htmlFor="installment" className={inputLabel}>
-                      Installment (₹) *
-                    </label>
-                    <input
-                      id="installment"
-                      name="installment"
-                      type="number"
-                      min={1}
-                      step="1"
-                      required
-                      defaultValue={Math.round(activeLoan.emi_paise / 100)}
-                      inputMode="numeric"
-                      className={input}
+                    <Money
+                      label="Penalty balance"
+                      value={formatINR(balances.penalty_balance_paise)}
                     />
-                  </div>
-                  <div>
-                    <label htmlFor="penalty" className={inputLabel}>
-                      Penalty (₹)
-                    </label>
-                    <input
-                      id="penalty"
-                      name="penalty"
-                      type="number"
-                      min={0}
-                      step="1"
-                      defaultValue={Math.round(suggestedPenalty / 100)}
-                      inputMode="numeric"
-                      className={input}
+                    <Money
+                      label="Total outstanding"
+                      value={formatINR(balances.loan_balance_paise)}
+                      strong
                     />
-                  </div>
-                  <div>
-                    <label htmlFor="receipt_no" className={inputLabel}>
-                      Receipt no.
-                    </label>
-                    <input id="receipt_no" name="receipt_no" className={input} />
-                  </div>
-                  <div>
-                    <label htmlFor="mode" className={inputLabel}>
-                      Mode
-                    </label>
-                    <select
-                      id="mode"
-                      name="mode"
-                      defaultValue="cash"
-                      className={input}
-                    >
-                      <option value="cash">Cash</option>
-                      <option value="online">Online</option>
-                    </select>
-                  </div>
-                  <label className="col-span-2 flex items-center gap-2 text-sm sm:col-span-3 lg:col-span-4">
-                    <input
-                      type="checkbox"
-                      name="signature"
-                      className="h-4 w-4 rounded border-border"
-                    />
-                    Signature taken
-                  </label>
-                  <SubmitButton
-                    pendingLabel="Recording…"
-                    className="col-span-2 min-h-10 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary-hover disabled:opacity-70 sm:col-span-3 lg:col-span-2"
-                  >
-                    Record installment
-                  </SubmitButton>
-                </form>
-
-                {suggestedPenalty > 0 ? (
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Penalty pre-filled at{" "}
-                    <strong className="text-foreground">
-                      {formatINR(activeLoan.penalty_rate_paise)}
-                    </strong>{" "}
-                    × {behind} month{behind === 1 ? "" : "s"} late ={" "}
-                    <strong className="text-foreground">
-                      {formatINR(suggestedPenalty)}
-                    </strong>
-                    . Edit it, or set 0 to waive.
-                  </p>
+                  </dl>
                 ) : null}
-                <p className="mt-1 text-xs text-muted-foreground">
-                  A printable receipt is created for every installment — the
+
+                <PaymentEntryForm
+                  action={logPaymentAction}
+                  customerId={customer.id}
+                  emiPaise={activeLoan.emi_paise}
+                  tenureMonths={activeLoan.tenure_months}
+                  emiCollectedPaise={balances?.emi_collected_paise ?? 0}
+                  emiOverduePaise={balances?.emi_overdue_paise ?? 0}
+                  penaltyChargedPaise={balances?.penalty_charged_paise ?? 0}
+                  penaltyCollectedPaise={balances?.penalty_collected_paise ?? 0}
+                  today={new Date().toISOString().slice(0, 10)}
+                />
+
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Enter the cash the customer actually handed over — the split
+                  across penalty and instalment is filled in for you and stays
+                  editable. A printable receipt is created every time, and the
                   Print receipt button appears as soon as you save.
+                </p>
+              </Panel>
+
+              {/* Recording 13 — a penalty-only receipt, kept separate so the
+                  employee cannot confuse it with a normal collection. */}
+              {penaltyBalance > 0 ? (
+                <Panel title="Pay penalty only">
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    Outstanding penalty{" "}
+                    <strong className="text-foreground">
+                      {formatINR(penaltyBalance)}
+                    </strong>
+                    . Use this when the customer is paying part or all of the
+                    penalty without an instalment.
+                  </p>
+                  <PaymentEntryForm
+                    action={logPaymentAction}
+                    customerId={customer.id}
+                    emiPaise={activeLoan.emi_paise}
+                    tenureMonths={activeLoan.tenure_months}
+                    emiCollectedPaise={balances?.emi_collected_paise ?? 0}
+                    emiOverduePaise={balances?.emi_overdue_paise ?? 0}
+                    penaltyChargedPaise={balances?.penalty_charged_paise ?? 0}
+                    penaltyCollectedPaise={
+                      balances?.penalty_collected_paise ?? 0
+                    }
+                    today={new Date().toISOString().slice(0, 10)}
+                    penaltyOnly
+                  />
+                </Panel>
+              ) : null}
+
+              {/* Recording 10 — increase / decrease / waive a penalty. Admin
+                  only; employees see the ledger read-only. */}
+              <Panel title="Penalty ledger">
+                {penaltyCharges.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[560px] text-sm">
+                      <thead className="bg-surface-muted text-xs uppercase tracking-wider text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Month</th>
+                          <th className="px-3 py-2 text-left">Period</th>
+                          <th className="px-3 py-2 text-left">Source</th>
+                          <th className="px-3 py-2 text-right">Charged</th>
+                          {isAdmin ? (
+                            <th className="px-3 py-2 text-right">Change</th>
+                          ) : null}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {penaltyCharges.map((pc) => (
+                          <tr key={pc.id} className="border-t border-border">
+                            <td className="px-3 py-2">{pc.month_no ?? "—"}</td>
+                            <td className="px-3 py-2">
+                              {fmtDate(pc.period_start)}
+                            </td>
+                            <td className="px-3 py-2">
+                              {pc.waived_at ? (
+                                <span className="text-muted-foreground">
+                                  Waived
+                                </span>
+                              ) : pc.source === "manual" ? (
+                                "Manual"
+                              ) : (
+                                "Automatic"
+                              )}
+                            </td>
+                            <td
+                              className={`px-3 py-2 text-right ${
+                                pc.waived_at
+                                  ? "text-muted-foreground line-through"
+                                  : "font-medium"
+                              }`}
+                            >
+                              {formatINR(pc.amount_paise)}
+                            </td>
+                            {isAdmin ? (
+                              <td className="px-3 py-2">
+                                <form
+                                  action={setPenaltyChargeAction}
+                                  className="flex items-center justify-end gap-1.5"
+                                >
+                                  <input
+                                    type="hidden"
+                                    name="customer_id"
+                                    value={customer.id}
+                                  />
+                                  <input
+                                    type="hidden"
+                                    name="penalty_id"
+                                    value={pc.id}
+                                  />
+                                  <input
+                                    name="amount"
+                                    type="number"
+                                    min={0}
+                                    step="1"
+                                    defaultValue={Math.round(
+                                      pc.amount_paise / 100,
+                                    )}
+                                    inputMode="numeric"
+                                    aria-label="Penalty amount in rupees"
+                                    className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-base sm:text-sm"
+                                  />
+                                  <SubmitButton
+                                    pendingLabel="…"
+                                    className="min-h-9 rounded-md border border-border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-70"
+                                  >
+                                    Save
+                                  </SubmitButton>
+                                  <SubmitButton
+                                    pendingLabel="…"
+                                    formAction={setPenaltyChargeAction}
+                                    name="waive"
+                                    value={pc.waived_at ? "false" : "true"}
+                                    className="min-h-9 rounded-md border border-border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-70"
+                                  >
+                                    {pc.waived_at ? "Restore" : "Waive"}
+                                  </SubmitButton>
+                                </form>
+                              </td>
+                            ) : null}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <Empty text="No penalty has been charged on this loan." />
+                )}
+                <p className="mt-3 text-xs text-muted-foreground">
+                  A penalty of{" "}
+                  <strong className="text-foreground">
+                    {formatINR(activeLoan.penalty_rate_paise)}
+                  </strong>{" "}
+                  is charged automatically for every instalment still short{" "}
+                  {activeLoan.grace_days} day
+                  {activeLoan.grace_days === 1 ? "" : "s"} after it falls due.
+                  {isAdmin
+                    ? " You can change or waive any charge above."
+                    : " Only a branch admin can change or waive a charge."}
                 </p>
               </Panel>
 
               <Panel title="Payments">
                 {payments.length ? (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px] text-sm">
+                    <table className="w-full min-w-[900px] text-sm">
                       <thead className="bg-surface-muted text-xs uppercase tracking-wider text-muted-foreground">
                         <tr>
                           <th className="px-3 py-2 text-left">Sr</th>
                           <th className="px-3 py-2 text-left">Date</th>
                           <th className="px-3 py-2 text-left">Month</th>
-                          <th className="px-3 py-2 text-right">Installment</th>
+                          <th className="px-3 py-2 text-right">Instalment</th>
                           <th className="px-3 py-2 text-right">Penalty</th>
                           <th className="px-3 py-2 text-right">Total</th>
-                          <th className="px-3 py-2 text-left">Receipt</th>
+                          <th className="px-3 py-2 text-left">Remark</th>
+                          <th className="px-3 py-2 text-left">Book no.</th>
                           <th className="px-3 py-2 text-center">Sign</th>
-                          <th className="px-3 py-2 text-center">Invoice</th>
+                          <th className="px-3 py-2 text-center">Receipt no.</th>
+                          {isAdmin ? (
+                            <th className="px-3 py-2 text-center">Correct</th>
+                          ) : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -677,6 +820,12 @@ export default async function CustomerCardPage({
                             </td>
                             <td className="px-3 py-2 text-right font-medium">
                               {formatINR(p.amount_paise + p.penalty_paise)}
+                            </td>
+                            <td
+                              className="max-w-[180px] truncate px-3 py-2 text-muted-foreground"
+                              title={p.remark ?? undefined}
+                            >
+                              {p.remark ?? "—"}
                             </td>
                             <td className="px-3 py-2">{p.receipt_no ?? "—"}</td>
                             <td className="px-3 py-2 text-center">
@@ -699,6 +848,76 @@ export default async function CustomerCardPage({
                                 {p.invoice_no ?? "Print"}
                               </Link>
                             </td>
+                            {/* Recording 13 — a recorded receipt may only be
+                                changed by an admin. Tucked behind a disclosure
+                                so the grid stays readable. */}
+                            {isAdmin ? (
+                              <td className="px-3 py-2 text-center">
+                                <details className="text-left">
+                                  <summary className="inline-flex min-h-9 cursor-pointer list-none items-center rounded-md border border-border px-2 py-1 text-xs font-medium hover:bg-muted">
+                                    Edit
+                                  </summary>
+                                  <form
+                                    action={amendPaymentAction}
+                                    className="mt-2 flex flex-wrap items-end gap-1.5"
+                                  >
+                                    <input
+                                      type="hidden"
+                                      name="customer_id"
+                                      value={customer.id}
+                                    />
+                                    <input
+                                      type="hidden"
+                                      name="payment_id"
+                                      value={p.id}
+                                    />
+                                    <input
+                                      name="installment"
+                                      type="number"
+                                      min={0}
+                                      step="1"
+                                      defaultValue={Math.round(
+                                        p.amount_paise / 100,
+                                      )}
+                                      aria-label="Instalment in rupees"
+                                      className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-base sm:text-sm"
+                                    />
+                                    <input
+                                      name="penalty"
+                                      type="number"
+                                      min={0}
+                                      step="1"
+                                      defaultValue={Math.round(
+                                        p.penalty_paise / 100,
+                                      )}
+                                      aria-label="Penalty in rupees"
+                                      className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-base sm:text-sm"
+                                    />
+                                    <input
+                                      name="remark"
+                                      defaultValue={p.remark ?? ""}
+                                      placeholder="Remark"
+                                      aria-label="Remark"
+                                      className="w-32 rounded-md border border-border bg-surface px-2 py-1.5 text-base sm:text-sm"
+                                    />
+                                    <SubmitButton
+                                      pendingLabel="…"
+                                      className="min-h-9 rounded-md border border-border px-2 py-1 text-xs font-medium hover:bg-muted disabled:opacity-70"
+                                    >
+                                      Save
+                                    </SubmitButton>
+                                    <SubmitButton
+                                      pendingLabel="…"
+                                      formAction={voidPaymentAction}
+                                      title="Void this receipt — the row is kept, but its money leaves every balance"
+                                      className="min-h-9 rounded-md border border-danger/40 px-2 py-1 text-xs font-medium text-danger hover:bg-danger-soft disabled:opacity-70"
+                                    >
+                                      Void
+                                    </SubmitButton>
+                                  </form>
+                                </details>
+                              </td>
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>

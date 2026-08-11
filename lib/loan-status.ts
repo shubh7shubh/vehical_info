@@ -1,14 +1,24 @@
 /**
- * Loan reminder status — the single source of truth for "how far behind is this
- * customer". Mirrors the Postgres `months_elapsed()` / `installments_due()` /
- * `customer_status_counts()` logic exactly (see
- * supabase/migrations/20260802120100_receipt_edit_rpcs.sql) so the header badges,
- * the customers list and the DB never disagree. Change the two together.
+ * Loan reminder status and money math — the single source of truth for "how far
+ * behind is this customer" and "what do they still owe".
+ *
+ * Mirrors the Postgres side exactly. Change the two together:
+ *   `months_elapsed()` / `installments_due()`
+ *     -> supabase/migrations/20260802120100_receipt_edit_rpcs.sql
+ *   `installments_settled()` / `pending_month_no()` / `pending_month_shortfall()`
+ *     -> supabase/migrations/20260812120100_penalty_ledger.sql
+ *   the `loan_balances` view (every balance below)
+ *     -> supabase/migrations/20260812120200_loan_balances_view.sql
  *
  * The schedule is anchored on the loan's **first EMI date**. When that is not
  * recorded (rows created before Phase 4.5) it falls back to
  * `purchase_date + 1 month`, which is exactly what the older purchase-anchored
  * math assumed — so no existing customer changes colour.
+ *
+ * Money is counted, not rows. Client feedback round 3 introduced partial EMIs, so
+ * "installments paid" is `floor(collected / emi)`, never `payments.length`. For a
+ * customer who has only ever paid whole EMIs the two are identical, which is why
+ * the reminder buckets did not move when that shipped.
  *
  * Buckets (pure months-behind):
  *   0 -> green, 1..2 -> yellow, 3 -> orange, >3 -> red.
@@ -126,19 +136,122 @@ export function categorize(behind: number): LoanColor {
   return "red";
 }
 
+/* -------------------------------------------------------------------------- */
+/* Money — mirrors the `loan_balances` view                                    */
+/* -------------------------------------------------------------------------- */
+
 /**
- * The penalty to pre-fill on the installment form (client: "penalty should be
- * monthly ₹500"). One slab per month behind. Per-day loans get no suggestion —
- * that needs a due-date-to-payment-date span, which is the deferred auto-penalty
- * engine's job, so the employee types it as before.
+ * Installments fully covered by the money collected. Cash is applied to
+ * installments in order, so this is integer division — two ₹2,500 receipts
+ * against a ₹5,000 EMI are one settled installment, not two.
+ *
+ * Capped at the tenure so an overpayment can never read "Paid 13 of 12".
  */
-export function suggestedPenaltyPaise(
-  behind: number,
-  penaltyType: string | null | undefined,
-  penaltyRatePaise: number | null | undefined,
+export function installmentsSettled(
+  emiPaise: number,
+  collectedPaise: number,
+  tenureMonths: number,
 ): number {
-  if (penaltyType !== "monthly_fixed") return 0;
-  return Math.max(behind, 0) * Math.max(penaltyRatePaise ?? 0, 0);
+  if (emiPaise <= 0) return 0;
+  return Math.min(
+    Math.floor(Math.max(collectedPaise, 0) / emiPaise),
+    tenureMonths,
+  );
+}
+
+/**
+ * The installment the next rupee lands on — "the EMI or month against which the
+ * balance is pending". Null once the whole tenure is covered.
+ */
+export function pendingMonthNo(
+  emiPaise: number,
+  collectedPaise: number,
+  tenureMonths: number,
+): number | null {
+  const settled = installmentsSettled(emiPaise, collectedPaise, tenureMonths);
+  return settled >= tenureMonths ? null : settled + 1;
+}
+
+/**
+ * How much more is needed to finish `pendingMonthNo` — the remaining EMI
+ * balance. On an exact multiple this is a full EMI (nothing paid toward that
+ * month yet); after a partial it is the remainder.
+ */
+export function pendingMonthShortfallPaise(
+  emiPaise: number,
+  collectedPaise: number,
+  tenureMonths: number,
+): number {
+  if (emiPaise <= 0) return 0;
+  if (installmentsSettled(emiPaise, collectedPaise, tenureMonths) >= tenureMonths) {
+    return 0;
+  }
+  return emiPaise - (Math.max(collectedPaise, 0) % emiPaise);
+}
+
+/**
+ * EMI money that is late right now: everything due by today, minus everything
+ * collected. This is what "outstanding due" means at the counter.
+ */
+export function emiOverduePaise(
+  emiPaise: number,
+  installmentsDueCount: number,
+  collectedPaise: number,
+): number {
+  return Math.max(installmentsDueCount * emiPaise - collectedPaise, 0);
+}
+
+/** EMI money left over the whole life of the loan. Never negative. */
+export function emiRemainingPaise(
+  emiPaise: number,
+  tenureMonths: number,
+  collectedPaise: number,
+): number {
+  return Math.max(tenureMonths * emiPaise - collectedPaise, 0);
+}
+
+/** Money collected beyond the entire loan — a customer credit. */
+export function advancePaise(
+  emiPaise: number,
+  tenureMonths: number,
+  collectedPaise: number,
+): number {
+  return Math.max(collectedPaise - tenureMonths * emiPaise, 0);
+}
+
+/** Penalty charged but not yet collected. Floored at 0 so a post-collection
+ *  waiver cannot show a negative balance. */
+export function penaltyBalancePaise(
+  chargedPaise: number,
+  collectedPaise: number,
+): number {
+  return Math.max(chargedPaise - collectedPaise, 0);
+}
+
+/**
+ * How one cash receipt is divided. Penalty is cleared first, then the EMI, and
+ * any surplus prepays future installments.
+ *
+ * The order lives here and nowhere else — flipping to EMI-first is a one-line
+ * change. The trade-off is real and worth re-checking with the client: a
+ * customer who hands over exactly one EMI while a penalty is outstanding leaves
+ * the counter with that month still short, because ₹500 of it went to the
+ * penalty. EMI-first would settle the month and leave the penalty owing instead.
+ * Either way the same total is outstanding; only the column differs.
+ */
+export function splitReceipt(opts: {
+  receivedPaise: number;
+  emiPaise: number;
+  emiOverduePaise: number;
+  penaltyBalancePaise: number;
+}): { towardsEmiPaise: number; towardsPenaltyPaise: number } {
+  const received = Math.max(opts.receivedPaise, 0);
+  const towardsPenalty = Math.min(
+    received,
+    Math.max(opts.penaltyBalancePaise, 0),
+  );
+  const towardsEmi = received - towardsPenalty;
+  return { towardsEmiPaise: towardsEmi, towardsPenaltyPaise: towardsPenalty };
 }
 
 /**
