@@ -1,5 +1,11 @@
 # Ledger Schema + Sub-ID Entry + Installment Registry + Reminder Counts
 
+> **⚠️ Parts of this document were superseded by client feedback round 3
+> (2026-08-12).** The schema, RPCs and UI below all shipped as described, but the
+> *accounting model* changed: instalments are now counted from money, not from
+> payment rows. Read **[§ Superseded by round 3](#superseded-by-round-3)** at the
+> bottom before using anything here as a reference.
+
 ## Context
 
 The client's mental model is the physical loan book (one ledger row per customer + a
@@ -217,3 +223,97 @@ All `create or replace`, business logic in Postgres per CLAUDE.md.
      add a follow-up → appears with timestamp.
    - Header shows green/yellow/orange/red counts for Branch A only; Branch B employee
      sees different counts; owner dashboard shows both branches' buckets.
+
+---
+
+## Superseded by round 3
+
+Client feedback round 3 (2026-08-12, Phases 4.9 and 4.95) kept everything above
+but replaced the accounting model underneath it. If you are reading this doc to
+understand how the ledger works today, these are the deltas.
+
+### 1. Instalments are counted from money, not from rows
+
+This document assumed one payment row = one full EMI. It never says so out loud,
+which is exactly why it drifted: `customer_status_counts()`, `owner_branch_stats()`,
+`payment_receipt().paid_count`, `update_customer`'s tenure guard and
+`paidCount = payments.length` in two pages each independently did
+`count(payments)`.
+
+The client pays short in the field, so all five became:
+
+```
+installments_settled(emi_paise, sum(amount_paise), tenure_months)
+  = least(collected / emi, tenure)          -- integer division
+```
+
+Two ₹2,500 receipts against a ₹5,000 EMI are **one** settled instalment.
+
+The reminder buckets in "Decisions" above are unchanged — `behind` is still
+`greatest(due − settled, 0)` — and for any customer who has only ever paid whole
+EMIs `settled == count` exactly, so nobody moved bucket on deploy.
+
+### 2. `public.loan_balances` is now the single read model
+
+Nothing should re-derive loan money. The view (`security_invoker = on`, so branch
+RLS applies to the caller unchanged) returns `emi_collected_paise`,
+`installments_settled`, `months_behind`, `emi_overdue_paise`,
+`emi_remaining_paise`, `penalty_balance_paise`, `pending_month_no`,
+`pending_month_balance_paise`, `outstanding_paise`, `loan_balance_paise`,
+`next_due_date` and more.
+
+Three "balances" are easy to confuse:
+
+| Column | Means |
+|---|---|
+| `emi_overdue_paise` | what is late **right now** (due-by-today × EMI − collected) |
+| `emi_remaining_paise` | what is left over the **whole loan** |
+| `outstanding_paise` | `emi_overdue + penalty_balance` — "collect this today" |
+| `loan_balance_paise` | `emi_remaining + penalty_balance` — "total to close out" |
+
+### 3. Penalty charged and penalty collected are separate
+
+`payments.penalty_paise` (added by the migration above) records only what was
+**collected**. It cannot answer "what penalty is still owed", which the client
+asked for three times.
+
+`public.penalties` — dead since Phase 2 — was revived as the accrual ledger, and
+`accrue_penalties(loan, as_of)` writes one ₹500 row per instalment still short at
+**its own** due date + `grace_days`. Judging each month by its own deadline rather
+than by today's balance is the load-bearing detail: judged by today, a customer
+who was three months late and has since caught up would be charged nothing on the
+first run, silently forgiving the entire backfilled history.
+
+`loans.penalty_accrual_from` limits how far back the engine reaches (NULL = full
+history). `accrue_penalties_all()` is the pg_cron entry point.
+
+### 4. A receipt may be short, or penalty-only
+
+`payments.amount_paise` is now `>= 0` with a `amount_paise + penalty_paise > 0`
+CHECK, so a "Pay penalty only" receipt exists. `payments` also gained `remark`,
+`updated_at` and `deleted_at` (soft delete, with admin-only `void_payment`).
+
+### 5. Receipt ordering is `(paid_at, invoice_no, id)` — never `id`
+
+`payment_receipt()` computes every figure **as of that payment** so a reprint
+reproduces the original slip. `paid_at` comes from a date input, so every receipt
+taken on the same day carries an identical midnight timestamp; the original
+`(paid_at, id)` tie-break therefore compared random UUIDs and made "total paid
+today" non-deterministic. `invoice_no` is sequence-stamped, so it is true
+insertion order.
+
+If you change that ordering, change it in `payment_receipt()` **and** in
+`accrue_penalties()`'s running-total window.
+
+### 6. The TS mirror grew
+
+`lib/loan-status.ts` now also mirrors `installments_settled`, `pending_month_no`,
+`pending_month_shortfall`, the `loan_balances` arithmetic, the receipt split
+(`splitReceipt`, penalty-first — the order lives in that one function) and
+foreclosure eligibility. Same rule as before: change it in lockstep with the SQL.
+
+### 7. Where to read next
+
+- `docs/PROJECT_REPORT.md` § Phase 4.9 and § Phase 4.95
+- `docs/TESTING.md` § Phase 4.9 and § Phase 4.95
+- Migrations `20260812120000` … `20260812130100`

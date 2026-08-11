@@ -22,35 +22,49 @@ System **branches** ke around bana hai. Simple picture yeh hai:
   records nahi dekh sakti. Isse har branch ki information alag aur secure rehti
   hai.
 
-Is round mein naya kya hai:
+System mein kya-kya hai:
 
-- Branch ke andar ab aap **customers add** kar sakte ho, **kisi bhi customer ko
+- Branch ke andar aap **customers add** kar sakte ho, **kisi bhi customer ko
   search** kar sakte ho, aur uska **poora customer card** khol sakte ho.
 - Purani loan-book (bahi) ko jaldi se bharne ke liye ek alag **Sub-ID** account
   hota hai — woh sirf data entry karta hai.
-- Har customer ke against aap har mahine ki **installment (hapta)** aur
-  **follow-up notes** record kar sakte ho.
+- Har customer ke against **hapta**, **penalty** aur **follow-up notes** record
+  hote hain.
 - Upar header mein **4 rang ke counts** dikhte hain (🟢 🟡 🟠 🔴) taaki staff ko
   pata chale kis customer ke peeche jaana hai.
+- **Foreclosure aur Seizing** ka alag page hai.
 
 ### ✨ Aapke pichle feedback par jo kaam hua (yeh zaroor test karo)
 
-Aapne jo 8 baatein bataayi thi, woh sab ho gayi hain:
+Aapki **15 recordings** ka kaam poora ho gaya hai:
 
 > 📄 **Sirf naye changes test karne hain?** Uske liye ek alag chhoti guide hai:
-> **`docs/CLIENT_TESTING_NEW_CHANGES_HINGLISH.md`** — usme sirf yeh 8 cheezein
-> hain, poora system dobara test karne ki zarurat nahi.
+> **`docs/CLIENT_TESTING_NEW_CHANGES_HINGLISH.md`** — usme sirf naya kaam hai,
+> poora system dobara test karne ki zarurat nahi.
 
 | Aapne kaha | Ab system mein | Kahan test karein |
 |---|---|---|
-| Har EMI ki **invoice print** nikalni chahiye | Har hapte ki ek **A5 pavti** print hoti hai (ek kaagaz par 2 copy — Office + Customer) | Test 10a |
-| Hapta bharne ka **option nahi mil raha tha** | Ab **Record EMI** ka button customer list mein, customer page par, aur dashboard par — teeno jagah hai | Test 10 |
-| Har page par **Back button** chahiye | Har page ke upar **Back** ka button aa gaya | Test 18 |
-| Print par **kitne hapte baaki hain** dikhna chahiye | Pavti par **"Paid 2 of 12 · PENDING 10"** aur agli tareekh chhapti hai | Test 10a |
-| Loan/sale date daalte hi **First EMI date** aani chahiye | Date daalte hi **First EMI date apne aap** bhar jati hai (aap badal bhi sakte ho) | Test 7 |
-| Penalty **mahine ka ₹500** ho | Penalty ka box apne aap **₹500 × kitne mahine late** bhar deta hai | Test 10 |
-| Bank ke naam **Dhanshree** aur **Bhagyalaxmi** | Bank list mein ab yahi do naam hain | Test 7 |
-| Customer page par **Edit / Print / Invoice Print** | Teeno button har customer ke page par | Test 10a, 19, 20 |
+| Customer **kam paisa** de toh baaki balance dikhe | Ek hi **"Amount received"** box — system khud penalty aur hapte mein baant deta hai, aur baaki balance batata hai | Test 10 |
+| **Sirf penalty** bharne ka alag option | **"Pay penalty only"** ka alag box | Test 10b |
+| Penalty **kam-zyada** karna sirf Owner/Admin | **Penalty ledger** — sirf Admin badal ya maaf kar sakta hai | Test 10b |
+| Instalment register mein **Remark** | Har entry par Remark ka box aur grid mein column | Test 10 |
+| Pavti ka number **apne aap** bane | **Receipt No. INV-000001** — system khud banata hai | Test 10a |
+| Print par **First EMI date** | Pavti par customer ke naam ke neeche | Test 10a |
+| Print par **total baaki** aur **aaj kitna liya** | Pavti par **Total paid today** aur **Total outstanding** | Test 10a |
+| Print par **poora hisaab** | EMI diya, EMI balance, penalty diya, penalty balance, kaunsa mahina baaki | Test 10a |
+| **Foreclosure aur Seizing** ka alag page | Naya **Foreclosure** page — loan number se search | Test 20a |
+| Foreclosure sirf **6 mahine** ke baad | 6 mahine se kam wale ka button **band** rehta hai | Test 20a |
+| Seizing mein search + **Add Seizing** | Usi page par Seizing ka box | Test 20b |
+| Saara paisa bharne par **Exit Seizing** | Paisa baaki ho toh system rok deta hai | Test 20b |
+| Seizing hataana sirf Owner/Admin | Employee ka button band rehta hai | Test 20b |
+| Har EMI ki **invoice print** | Ek A5 pavti (ek kaagaz par 2 copy) | Test 10a |
+| Hapta bharne ka **option nahi mil raha tha** | **Record EMI** ka button teen jagah | Test 10 |
+| Har page par **Back button** | Har page ke upar **Back** | Test 18 |
+| Print par **kitne hapte baaki** | **"Paid 2 of 12 · PENDING 10"** | Test 10a |
+| Loan date daalte hi **First EMI date** | Apne aap bhar jati hai | Test 7 |
+| Penalty **mahine ka ₹500** | System **khud** lagata hai, har late mahine ke liye | Test 10b |
+| Bank ke naam **Dhanshree** / **Bhagyalaxmi** | Bank list mein yahi do naam | Test 7 |
+| Customer page par **Edit / Print / Invoice Print** | Teeno button | Test 10a, 19, 20 |
 
 ---
 
@@ -390,41 +404,69 @@ Aapne kaha tha ki hapta bharne ka option milta nahi hai. Ab **teen** raaste hain
 1. Employee (ya Admin) ke roop mein → **Customers** → search box mein
    `3473` (ya `Ramesh`) type karke search karo → **Ramesh Patil** ke card par
    **Record EMI** click karo
-2. ✅ Is tab par dikhega: ek status badge, **"Paid X of Y · Z pending"** aur
-   **Next due** tareekh, ek **Add installment** form, ek **payments grid**
-   (Sr / Date / Month / Installment / Penalty / Total / Receipt / Sign /
-   **Invoice**) aur ek **Follow-ups** log
-3. **Add installment** form bharo —
+2. ✅ Is tab par dikhega: ek status badge, **"Paid X of Y · Z pending"**,
+   **Next due** tareekh, ek **balance ka box**, hapta bharne ka form, ek
+   **payments grid** (Sr / Date / Month / Instalment / Penalty / Total /
+   **Remark** / Book no. / Sign / **Receipt no.**), ek **Penalty ledger** aur ek
+   **Follow-ups** log
 
-   **📋 Example — pehla hapta:**
+### 🆕 Pehle balance ka box dekho
 
-   | Box | Kya daalein |
+Ramesh 5 mahine se ek bhi hapta nahi bhara, isliye upar chaar number dikhenge:
+
+| Box | Kya dikhega |
+|---|---|
+| Balance on EMI #1 | **₹5,000** |
+| EMI overdue | **₹25,000** |
+| Penalty balance | **₹2,000** |
+| **Total outstanding** | **₹62,000** |
+
+> Penalty ₹2,000 kyun? **4 hapte** apni tareekh (+2 din) nikal chuke hain,
+> ₹500 × 4 = ₹2,000. Paanchwa hapta abhi-abhi due hua hai, uspe abhi penalty
+> nahi. System yeh **khud** lagata hai — aapko likhna nahi padta.
+
+### 🆕 Ab hapta bharo — sirf ek box
+
+Pehle alag-alag box the. Ab **sirf ek box** hai: **Amount received**.
+
+3. **Amount received** mein `3000` daalo (jaan-bujh kar poora nahi)
+
+   ✅ Neeche **apne aap** ban jayega:
+   - **Towards penalty ₹2,000**
+   - **Towards instalment ₹1,000**
+
+   ✅ Aur uske neeche **abhi ka hisaab** dikhega:
+
+   | | |
    |---|---|
-   | Month number | `1` |
-   | Date | aaj ki tareekh |
-   | Installment amount | `5000` (apne aap EMI aa jaata hai) |
-   | Penalty | **apne aap bhara hua aayega** — niche padho |
-   | Receipt number | `R-001` |
-   | Mode | `Cash` |
-   | Signature | tick karo (✓) |
+   | Instalments settled | **0 of 12** |
+   | Balance on EMI #1 | **₹4,000** |
+   | Penalty balance | **₹0** |
+   | **Total outstanding** | **₹59,000** |
 
-   ### 🆕 Penalty apne aap ₹500 prati mahina
-   Ramesh 5 mahine purana hai aur abhi tak ek bhi hapta nahi bhara, matlab
-   **5 mahine late**. Isliye Penalty ka box apne aap **₹2,500** (₹500 × 5) bhar
-   ke aayega, aur neeche likha hoga *"Penalty pre-filled at ₹500 × 5 months late
-   = ₹2,500. Edit it, or set 0 to waive."*
+   **Yeh sabse zaroori baat hai:** ₹1,000 dene se hapta **poora nahi hua**,
+   isliye "0 of 12" hi rahega aur ₹4,000 **balance** ban gaya.
 
-   ✅ **Yeh aapke control mein hai** — number badal sakte ho, ya `0` karke
-   penalty maaf kar sakte ho. System zabardasti nahi lagata.
+   ✅ Split ke dono box **aap khud bhi badal sakte ho** — ek badloge toh doosra
+   apne aap adjust ho jayega. Wapas automatic karna ho toh **Reset to
+   automatic** dabao.
 
-   Test ke liye penalty `500` kar do aur Save karo.
+4. Baaki bharo — **Date** aaj ki, **Mode** `Cash`, **Book no.** `R-001`,
+   **Remark** `Aadha paisa, baaki agle hafte`, **Signature taken** tick ✓
+5. **Record instalment** dabao
 
-   ✅ Green banner aayega **"Installment recorded"** — aur uske bagal mein ek
-   **Print receipt** ka button (yeh Test 10a hai). Payments grid mein ek row
-   dikhegi jismein **Total = 5000 + 500 = 5500**, aur "Paid 1 of 12 · 11 pending".
-4. **Ek aur hapta add karke dekho** — Month number `2`, amount `5000`, penalty
-   `0`, receipt `R-002`. ✅ Ab "Paid 2 of 12 · 10 pending" ho jayega aur grid mein
-   2 rows dikhengi.
+   ✅ Green banner **"Instalment recorded"** + bagal mein **Print receipt** ka
+   button (yeh Test 10a hai). Grid mein row aa jayegi, jismein **Remark** ka
+   column bhi hai.
+
+6. **Ab baaki paisa daalo** — **Amount received** mein `4000` → poora
+   instalment mein jayega (penalty ab ₹0 hai)
+
+   ✅ **Ab "Paid 1 of 12"** ho jayega!
+
+   **Do entry hui, lekin hapta ek hi gina gaya.** Pehle system har entry ko ek
+   pura hapta maanta tha — ab woh **paise se ginta hai**, isliye hisaab hamesha
+   sahi rehta hai.
 
 ---
 
@@ -439,21 +481,31 @@ Yeh aapki sabse badi demand thi — har hapte ki print customer ko dene ke liye.
 
 ### Purane hapte ki print
 
-- **Kisi bhi row ki:** payments grid mein har row ke aakhir mein **Invoice**
+- **Kisi bhi row ki:** payments grid mein har row ke aakhir mein **Receipt no.**
   column hai jismein `INV-000001` jaisa button hai → click karo.
 - **Sabse aakhri hapte ki:** customer ke page par upar **Invoice print** button.
 
 ### ✅ Print page par kya dikhna chahiye
 
-| Cheez | Kya likha hoga |
-|---|---|
-| Sabse upar | Aapki **branch ka naam**, address aur phone |
-| Pavti number | **Invoice INV-000001** (system ka apna number) aur aapka likha **Receipt book no. R-001** |
-| Customer | `A/c 3473`, `Ramesh Suresh Patil`, gaon-post-taluka-zilla, mobile, model |
-| Paisa | Installment `₹5,000`, Penalty `₹500`, **TOTAL PAID `₹5,500`** |
-| **Kitne baaki** | **`Paid 1 of 12`** aur bade akshar mein **`PENDING 11`** |
-| Agli tareekh | **Next due** — agla hapta kab bharna hai |
-| Sabse neeche | **Received by** aur **Customer signature** ki do lines |
+Test 10 wali **pehli** pavti (₹3,000 wali) kholiye aur ek-ek karke check kijiye:
+
+| # | Cheez | Kya likha hoga |
+|---|---|---|
+| 1 | Sabse upar | Aapki **branch ka naam**, address aur phone |
+| 2 | 🆕 Pavti number | **Receipt No. INV-000001** — system ne **khud** banaya |
+| 3 | Aapka number | **Book no. R-001** (jo aapne haath se bhara) |
+| 4 | Customer | `A/c 3473`, `Ramesh Suresh Patil`, gaon-post-taluka-zilla, mobile, model |
+| 5 | 🆕 **First EMI date** | Naam ke neeche — `Date … · EMI ₹5,000 · First EMI …` |
+| 6 | 🆕 Aaj ka EMI | `Instalment no. 1` → **₹1,000** |
+| 7 | 🆕 EMI ka balance | `Balance on EMI #1` → **₹4,000** |
+| 8 | 🆕 Aaj ki penalty | `Penalty paid` → **₹2,000** |
+| 9 | 🆕 Penalty balance | **₹0** |
+| 10 | 🆕 **Aaj kul kitna liya** | `Total paid today` → **₹3,000** |
+| 11 | 🆕 **Kul kitna baaki** | `Total outstanding` → **₹59,000** |
+| 12 | Kitne baaki | **`Paid 0 of 12`** aur **`PENDING 12`** |
+| 13 | Agli tareekh | **Next due** |
+| 14 | 🆕 Remark | `Aadha paisa, baaki agle hafte` |
+| 15 | Sabse neeche | **Received by** aur **Customer signature** ki do lines |
 
 1. **Print receipt** (ya `Ctrl + P`) dabao
 2. ✅ Print preview mein dekho:
@@ -462,13 +514,64 @@ Yeh aapki sabse badi demand thi — har hapte ki print customer ko dene ke liye.
      customer ko do, ek apne paas rakho.
    - Print mein app ka **neela header, menu aur buttons nahi aane chahiye** —
      sirf pavti.
-3. **Purani pavti dobara print karke dekho:** grid mein **pehle** hapte ka
-   Invoice button dabao → ✅ us par **`Paid 1 of 12 · PENDING 11`** hi likha
-   rahega, `Paid 2` nahi. Kyunki pavti us din ka record hai — baad mein bhare
-   hapte usko badalte nahi. Yeh jaan-bujh kar aisa rakha hai.
+3. **⭐ Purani pavti dobara print karke dekho:** doosri pavti kholo, phir wapas
+   **pehli** wali kholo → ✅ us par **abhi bhi wahi purane number** honge —
+   `Balance on EMI #1 = ₹4,000`, `Total paid today = ₹3,000`.
+
+   Kyunki pavti **us din ka record** hai. Jo kaagaz customer ko us din diya tha,
+   dobara nikalne par bilkul wahi nikalna chahiye — warna hisaab mein gadbad ho
+   jayegi. Yeh jaan-bujh kar aisa rakha hai.
 
 > **Printer ke baare mein:** yeh normal A4/A5 printer ke liye banaya hai jo aapke
 > paas pehle se hai — koi special machine ki zarurat nahi.
+
+---
+
+## Test 10b — 🆕 Penalty ka ledger, aur sirf penalty bharna
+
+### Penalty ka poora hisaab dikhta hai
+
+**EMI / Payments** tab mein neeche **Penalty ledger** ka box hai.
+
+✅ Har late mahine ka alag row dikhega:
+
+| Month | Period | Source | Charged |
+|---|---|---|---|
+| 1 | (tareekh) | Automatic | ₹500 |
+| 2 | (tareekh) | Automatic | ₹500 |
+| 3 | (tareekh) | Automatic | ₹500 |
+| 4 | (tareekh) | Automatic | ₹500 |
+
+Neeche likha hoga:
+> *"A penalty of ₹500 is charged automatically for every instalment still short
+> 2 days after it falls due."*
+
+### 🆕 Penalty badalna — sirf Admin
+
+**Admin se login** karke dekhiye — har row ke aage ek **box aur do button**:
+
+1. Pehle row ka `500` badal kar `300` kar do → **Save**
+   ✅ Banner "Penalty updated", penalty balance ₹200 kam
+2. Usi row par **Waive** dabao
+   ✅ Row par line lag jayegi, balance aur ₹300 kam
+   ✅ **Restore** se wapas aa jayega
+
+**⚠️ Ab Employee se login karke wahi customer kholiye:**
+✅ Employee ko box aur button **dikhne hi nahi chahiye** — sirf list, aur neeche
+likha hoga *"Only a branch admin can change or waive a charge."*
+
+### 🆕 Sirf penalty bharna
+
+Jab penalty balance ₹0 se zyada ho, tab **"Pay penalty only"** naam ka alag box
+dikhta hai.
+
+1. **Amount received** mein `500` daalo (poori penalty nahi, aadhi)
+2. ✅ Poora ₹500 **penalty** mein jayega, instalment ₹0
+3. **Record penalty payment** dabao
+
+✅ Banner **"Penalty payment recorded"**, penalty balance kam ho jayega, aur
+**hapte ki ginti bilkul nahi badlegi**.
+✅ Us pavti par upar **"Penalty Receipt"** likha aayega (EMI Receipt nahi).
 
 ---
 
@@ -723,6 +826,116 @@ customer ka poora khata, ek A4 kaagaz par.
 
 ---
 
+## Test 20a — 🆕 Foreclosure (loan jaldi band karna)
+
+### Page kholo
+
+1. Upar menu mein **Foreclosure** naam ka link hai — dabao
+   > Phone par ☰ (teen line) wale button se milega. Dashboard par bhi ek tile hai.
+2. **Loan / account number** ke box mein `3473` daalo → **Search** → naam par click
+
+✅ **Loan details** ka box khulega: loan amount, EMI, tenure, **loan start date**,
+first EMI date, gaadi/RC — aur daayein taraf instalments paid, months behind,
+EMI overdue, penalty balance, **Total outstanding**.
+
+> **Note:** yahan "loan number" ka matlab wahi **account number** hai jo aap book
+> mein likhte ho. System mein alag se koi loan number nahi hai — agar aap chahte
+> ho ki alag number ho toh bataiyega.
+
+### 🆕 6 mahine ka niyam
+
+Ramesh ka loan 5 mahine purana hai (Test 7 mein aisa hi banaya tha).
+
+✅ **Peela banner:** *"Foreclosure opens six months after the loan start date.
+This loan is 5 months old — eligible from (tareekh)"*
+✅ **Add Foreclosure** ka button **dhundhla aur band** — dabta hi nahi.
+
+**Poora test karne ke liye ek naya customer banao** (Test 7 jaisa) —
+account `3475`, naam `Vijay More`, **purchase date 8 mahine pehle**.
+
+✅ Ab `3475` par **Add Foreclosure** ka button **chaalu** ho jayega, aur upar
+poora hisaab dikhega:
+
+| Cheez | Matlab |
+|---|---|
+| Remaining months | Kitne hapte baaki |
+| EMI outstanding | Kul kitna paisa baaki |
+| Interest still scheduled | Aage ka byaj |
+| Penalty balance | Penalty baaki |
+| **Customer saves** | Customer ka fayda |
+| **Final payable** | **Customer ko kitna dena hai** |
+
+Do box aap badal sakte ho: **Interest waived** aur **Bank charge** (₹1,000 apne
+aap bhara hai).
+
+3. **Add Foreclosure** dabao → ✅ neeche list mein row (Unpaid)
+4. Customer paisa de de toh **Mark paid** dabao (NOC ka tick bhi laga sakte ho)
+   → ✅ loan **band** ho jayega, status `Foreclosed`
+
+### 📌 Ek baat poochhni hai
+
+Foreclosure ka hisaab humne aise lagaya hai:
+
+> **Jo paisa baaki hai − jitna byaj maaf kiya + ₹1,000 bank charge + penalty**
+
+👉 **Bataiye yeh sahi hai?** Aur ₹1,000 bank charge har baar ek hi rehta hai ya
+badalta hai?
+
+### ⚠️ Employee se check karo
+
+Employee login se `3475` kholo → ✅ **Add Foreclosure** ka button **band** hoga,
+aur neeche likha hoga *"Only a branch admin can record a foreclosure."*
+
+---
+
+## Test 20b — 🆕 Seizing (gaadi uthana) aur Exit Seizing
+
+Usi **Foreclosure** page par neeche **Seizing** ka box hai.
+
+### Add Seizing
+
+**Admin se:**
+1. `3473` (Ramesh) kholo → **Seizing** box
+2. **Seizing charges** `1000`, **Notes** `Gaadi uthai gayi`
+3. **Approve now** ka tick laga rehne do → **Add Seizing**
+
+✅ Laal pill **"Seized"** dikhega, tareekh aur rakam ke saath.
+✅ Sabse neeche **"Currently seized"** ki list mein woh customer aa jayega.
+
+**Employee se** (kisi doosre customer par):
+✅ Entry **"Pending approval"** (peeli) rehti hai — *"Your entry is saved as
+pending until a branch admin approves the amount."*
+✅ Admin se **Approve seizing** dabao (rakam badal bhi sakte ho) → ✅ **"Seized"**
+
+### 🆕 Exit Seizing — paisa baaki ho toh system rok deta hai
+
+Ramesh ka abhi bahut paisa baaki hai.
+
+✅ **Exit Seizing** ka button **band** hoga, aur neeche likha hoga:
+> *"₹XX,XXX is still outstanding (dues + penalty). The customer can only leave
+> seizing once that, and any recorded foreclosure amount, is cleared."*
+
+### Ab saara paisa bhar kar dekho
+
+1. Ramesh ke customer page par jaake **saara baaki paisa** bhar do
+   (Amount received mein poora **Total outstanding** daal do)
+2. Wapas **Foreclosure** page par `3473` kholo
+
+✅ Ab **Exit Seizing** chaalu ho jayega.
+3. **Reason** mein `Saara paisa bhar diya` likho → **Exit Seizing** dabao
+
+✅ Green banner **"Customer removed from seizing"**
+✅ "Currently seized" list se woh customer **hat jayega**
+✅ Neeche chhote akshar mein *"Released (tareekh) — Saara paisa bhar diya"*
+
+### ⚠️ Employee se check karo
+
+Employee login se kisi seize kiye hue customer par jao →
+✅ **Exit Seizing** ka button **band**, aur likha hoga
+*"Only a branch admin can remove a customer from seizing."*
+
+---
+
 ## Test 21 — Sign out karo
 
 1. Upar-right corner mein **Sign out** par click karo
@@ -745,36 +958,61 @@ Please humein bataiye:
 | Kya aap installment aur follow-up record kar paaye? | Haan / Nahi |
 | Kya header ke 🟢 🟡 🟠 🔴 counts sahi lage? | Haan / Nahi |
 | Kya har branch sirf apna hi staff aur customers dekh paayi? | Haan / Nahi |
-| **🆕 Kya EMI ki pavti (invoice) print theek nikli?** | Haan / Nahi |
-| **🆕 Kya pavti par "PENDING" ki ginti sahi thi?** | Haan / Nahi |
-| **🆕 Kya ek A4 par 2 copy (Office + Customer) sahi lagi, ya kuch aur chahiye?** | (notes) |
-| **🆕 Kya Record EMI ka button ab aasaani se mil raha hai?** | Haan / Nahi |
+| **🆕 Kam paisa daalne par split apne aap sahi aaya?** | Haan / Nahi |
+| **🆕 Balance aur "kaunsa hapta baaki" sahi dikha?** | Haan / Nahi |
+| **🆕 Sirf penalty bharne ka option theek chala?** | Haan / Nahi |
+| **🆕 Kya EMI ki pavti print theek nikli, poore hisaab ke saath?** | Haan / Nahi |
+| **🆕 Kya ek A4 par 2 copy (Office + Customer) sahi lagi?** | (notes) |
+| **🆕 Receipt No. ka format (INV-000001) theek hai?** | Haan / Nahi |
+| **🆕 Remark ka option kaam ka hai?** | Haan / Nahi |
+| **🆕 System khud ₹500 penalty lagaye — theek hai?** | Haan / Nahi |
+| **🆕 Penalty badalna sirf Admin — theek hai?** | (notes) |
 | **🆕 Kya First EMI date apne aap sahi aa rahi hai?** | Haan / Nahi |
-| **🆕 Kya ₹500 wali penalty apne aap bharna theek hai, ya khaali chhodein?** | (notes) |
 | **🆕 Kya bank ke naam (Dhanshree / Bhagyalaxmi) sahi hain?** | Haan / Nahi |
 | **🆕 Kya Edit ka option theek chala?** | Haan / Nahi |
 | **🆕 Kya har page par Back button mil raha hai?** | Haan / Nahi |
-| Kya saare 21 tests pass hue? | Haan / Nahi |
+| **🆕 Foreclosure page par loan number se detail mili?** | Haan / Nahi |
+| **🆕 6 mahine wala niyam sahi chala?** | Haan / Nahi |
+| **🆕 Foreclosure ka hisaab sahi hai?** | (notes) |
+| **🆕 Add Seizing / Approve / Exit Seizing theek chala?** | Haan / Nahi |
+| Kya saare tests pass hue? | Haan / Nahi |
 | Kuch aisa jo guide ke hisaab se kaam nahi kiya? | (notes) |
 | Kuch screen confusing ya samajh na aane wali lagi? | (notes) |
 | Phone par screens theek fit hui aur chali? | Haan / Nahi |
+
+### ⬅️ Chaar sawaal jinke jawab humein chahiye
+
+**1. Penalty pehle ya EMI pehle?**
+Customer ₹5,000 deta hai, uspe ₹500 penalty bhi baaki hai. Do tarike:
+- **Abhi jaisa hai:** ₹500 penalty + ₹4,500 EMI → hapta ₹500 se **kam** reh jayega
+- **Doosra tarika:** ₹5,000 poora EMI → **hapta poora**, penalty ₹500 baaki rahegi
+
+Dono mein ₹500 hi baaki rehta hai — bas **kis column mein** dikhega, woh farak hai.
+
+**2. Purani penalty lagani hai ya aaj se?**
+Aapke ~5,000 purane customers hain. Agar kisi ka hapta 2 saal se late hai toh
+system ab **poore 2 saal ki penalty** laga dega (₹500 × 24 = ₹12,000).
+Poora hisaab lagayein, ya aaj se hi shuru karein?
+
+**3. Penalty badalne aur Seizing hataane ka haq Owner ko bhi?**
+Aapne kaha tha "Owner aur Admin". Filhal **sirf Admin** ko diya hai, kyunki system
+mein **Owner sirf dekhne ke liye** banaya gaya hai (suraksha ke liye). Employee ko
+toh rok diya gaya hai, jo aapki main baat thi.
+
+**4. Foreclosure ka hisaab** (Test 20a dekhiye)
 
 ---
 
 ## Aage kya aa raha hai
 
-Agle kuch din mein, **har branch ke andar** yeh aayega:
-
-- **Poori automatic penalty** — abhi system ₹500 × late mahine ka **suggestion**
-  deta hai aur aap confirm karte ho. Aage system khud grace period ke baad
-  penalty laga dega, bina kisi ko chhue.
 - **Pending customer list** — 0 / 1 / 3 / 5 / Below 3 / Above 5 overdue hapton ke
   hisaab se filter
 - **Bank Recovery lists** — har partner bank ke liye ek, rang ke hisaab se
 - **Daily Summary** — din ke end ka cash + online collection, totals, pending
-- **Foreclosure & Seizure** — loan jaldi band karne ka calculator aur gaadi
-  seize karne ki entry
 - **Documents & Keys** — physical handover status track karna
+- **OTP** — penalty badalne, foreclosure aur seizing par mobile OTP ki suraksha
+- **Penalty har raat apne aap** — abhi penalty tab lagti hai jab aap customer ka
+  page kholte ho ya paisa bharte ho. Aage woh har raat khud lag jayegi.
 
 Har naye piece ke liye aapko ek updated test guide milegi.
 
