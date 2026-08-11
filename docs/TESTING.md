@@ -654,7 +654,8 @@ still two A5 copies on one A4 with no app chrome.
 
 ### 7. Automated coverage
 
-`npm test` → 54 Vitest cases. `npx supabase test db` → **74** pgTAP assertions.
+`npm test` → 58 Vitest cases. `npx supabase test db` → **105** pgTAP assertions
+(74 after this phase; slice B below adds the rest).
 All 38 pre-existing assertions are unchanged and still pass — that is the
 regression proof that whole-EMI payers did not move reminder bucket, since
 `installments_settled == count(payments)` exactly when every payment is one EMI.
@@ -665,18 +666,156 @@ partial-payment allocation, the penalty-only receipt, `payment_receipt`'s new
 keys, admin-vs-employee-vs-owner gating on `set_penalty_charge` / `amend_payment`,
 and `void_payment` leaving a soft-deleted row out of the balances.
 
-> **No Node on the machine?** The suites need it. As a fallback you can replay the
-> migrations and run pgTAP straight against a container:
-> `docker run -d --name pgcheck -e POSTGRES_PASSWORD=postgres public.ecr.aws/supabase/postgres:17.6.1.127`,
-> stub `auth.users` + `auth.uid()` (reading `request.jwt.claims`) and the
-> `anon`/`authenticated`/`service_role` roles, then pipe each migration and
-> `supabase/tests/ledger_test.sql` through `psql -U supabase_admin`.
+### No Node on the machine? Verify through Docker
+
+Both suites normally need Node. If it is missing (or broken), all three checks can
+still be run against containers — this is how this phase was verified.
+
+**pgTAP.** Start the same Postgres image the CLI uses, wait for init to finish
+(the log prints "ready to accept connections" **twice**), stub what the Supabase
+platform normally provides, then pipe each migration and the test file through:
+
+```bash
+docker run -d --name pgcheck -e POSTGRES_PASSWORD=postgres \
+  public.ecr.aws/supabase/postgres:17.6.1.127
+# stubs: pgcrypto, pg_trgm, pgtap; schema auth + auth.users;
+#        auth.uid() reading request.jwt.claims; roles anon/authenticated/service_role
+for f in supabase/migrations/*.sql; do
+  docker exec -i -u postgres pgcheck psql -U supabase_admin -d postgres \
+    -v ON_ERROR_STOP=1 -q < "$f" || echo "FAILED $f"
+done
+docker exec -i -u postgres pgcheck psql -U supabase_admin -d postgres -q \
+  < supabase/tests/ledger_test.sql
+```
+
+> The stub `auth.uid()` **must** read `request.jwt.claims` — a version that
+> returns NULL makes every RPC test fail with "Not authorized" and looks like a
+> code bug.
+
+**tsc and Vitest.** `tsc` is pure JS and runs straight off the mounted
+`node_modules`. Vitest additionally needs Linux builds of rollup and esbuild,
+which a Windows install does not have — side-load them **at the exact versions in
+`node_modules`** (a mismatch fails with "Host version does not match binary
+version") rather than writing into the project:
+
+```bash
+docker run --rm -v "//c/path/to/banking-app:/app" -w /app node:22-alpine \
+  node node_modules/typescript/bin/tsc --noEmit
+
+docker run --rm -v "//c/path/to/banking-app:/app" -w /app node:22-alpine sh -c "
+  npm i --prefix /tmp/fix @rollup/rollup-linux-x64-musl@<ver> @esbuild/linux-x64@<ver>
+  export NODE_PATH=/tmp/fix/node_modules
+  export ESBUILD_BINARY_PATH=/tmp/fix/node_modules/@esbuild/linux-x64/bin/esbuild
+  node node_modules/vitest/vitest.mjs run"
+```
+
+ESLint does **not** survive this route — it dies with `EIO: i/o error` reading
+through a OneDrive bind mount. Run `npm run lint` on a machine with Node.
 
 ---
 
-## Phase 4.95 — Foreclosure & Seizing page (planned)
+## Phase 4.95 — Foreclosure & Seizing
 
-> Client feedback round 3, slice B — recordings 4–9. To be filled in once it ships.
+Client feedback round 3, slice B — recordings 4 to 9.
+
+### 0. Apply the migrations
+
+`20260812130000_closure_columns.sql`, `20260812130100_closure_rpcs.sql`.
+
+Both `foreclosures` and `seizures` have existed since Phase 2 with branch columns,
+triggers and RLS, so these files only add the columns the screen needs. **No new
+enum value:** Exit Seizing is `status = 'resolved'` plus `exited_at`, which avoids
+the own-file `ALTER TYPE … ADD VALUE` dance for what would be a synonym.
+
+### 1. Search by "loan number"
+
+`/dashboard/foreclosure` → the box is labelled **Loan / account number** and runs
+`search_customers`, the same RPC the customers page uses. There is no `loan_no`
+column and inventing one would hand the branch an identifier that is not in their
+books; `customers.account_no` is the number they actually write down.
+
+Name, mobile, RC and engine number all still match.
+
+### 2. The six-month rule (recordings 5 and 6)
+
+Back-date two customers: one **7 months** old, one **3 months** old.
+
+| Loan age | Add Foreclosure | Panel |
+|---|---|---|
+| 7 months | enabled (for an admin) | the full quote |
+| 3 months | **disabled**, tooltip names the eligible-from date | amber "opens six months after the loan start date" banner |
+
+Then prove the button is only a courtesy — call the RPC directly for the young
+loan and watch it refuse:
+
+```sql
+select public.record_foreclosure(jsonb_build_object('loan_id', '<young-loan>'));
+-- ERROR: Foreclosure is only allowed after six months — eligible from DD-MM-YYYY
+```
+
+### 3. The quote
+
+`loans` has no interest column, so interest is derived:
+`total_interest = emi × tenure − principal`, split straight-line across the
+tenure. Two figures stay with the operator: **interest waived** (defaults to the
+whole remaining interest) and **bank charge** (defaults to ₹1,000, PRD §3.7).
+
+```
+final_payable = greatest(emi_outstanding − interest_waived, 0)
+                + bank_charge + penalty_balance
+```
+
+> PRD §3.7's worked example ("₹6,000 − ₹1,000 = ₹5,000") actually describes the
+> customer's **saving**, not what they hand over. The screen shows
+> `customer_saving_paise` and `final_payable_paise` as separate labelled rows so
+> the two can never be confused again. Worth confirming with the client.
+
+Recording the quote snapshots every line, so a foreclosure printed today is still
+explainable months later.
+
+### 4. Seizure lifecycle (recordings 7, 8, 9)
+
+| Step | Who | Result |
+|---|---|---|
+| Add Seizing | employee | `pending` |
+| Add Seizing + "Approve now" | admin | `active` |
+| Approve seizing (amount editable) | admin only | `pending` → `active` |
+| Exit Seizing | **admin only** | `resolved` + `exited_at` |
+
+A second open seizure on the same customer is refused by
+`seizures_open_uq` *and* by `record_seizure`.
+
+### 5. Exit Seizing guards (recording 8)
+
+`exit_seizure` accrues penalties first, then refuses unless **all three** are
+clear, naming the figure that blocks it:
+
+| Blocker | Message |
+|---|---|
+| EMI arrears | *EMI arrears of Rs 12,500.00 are still outstanding* |
+| Penalty balance | *A penalty of Rs 1,500.00 is still outstanding* |
+| Unpaid foreclosure quote | *The recorded foreclosure amount has not been paid* |
+
+> It checks **arrears**, not the whole remaining loan. A customer who has caught
+> up mid-tenure gets the vehicle back; demanding the entire balance would mean
+> nobody is ever released, which is neither what the client described nor what
+> happens in practice.
+
+### 6. Roles
+
+Same call as slice A: the client said "Owner and Admin", this ships **admin-only**
+because the owner is read-only at the DB layer. Check as an employee that Add
+Foreclosure, Approve and Exit Seizing are all disabled with a reason, and that the
+RPCs refuse even if the button is bypassed.
+
+### 7. Automated coverage
+
+pgTAP fixtures `FORE-1` (7 months, in arrears), `FORE-2` (3 months, not eligible)
+and `FORE-3` (7 months, every instalment paid **on its own due date**, so nothing
+accrued — the Exit Seizing happy path). 31 assertions covering eligibility both
+ways, the server-side re-check, the quote arithmetic, duplicate-quote and
+duplicate-seizure rejection, every role gate, all three exit guards, and
+`settle_foreclosure` closing the loan as `foreclosed`.
 
 ---
 

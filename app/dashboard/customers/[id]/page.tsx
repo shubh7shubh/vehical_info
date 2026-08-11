@@ -125,6 +125,22 @@ type PenaltyCharge = {
   note: string | null;
   waived_at: string | null;
 };
+type Foreclosure = {
+  id: string;
+  calculated_at: string;
+  final_payable_paise: number;
+  paid_at: string | null;
+  noc_issued_at: string | null;
+};
+type Seizure = {
+  id: string;
+  status: string;
+  amount_paise: number;
+  notes: string | null;
+  created_at: string;
+  exited_at: string | null;
+  exit_reason: string | null;
+};
 
 const TABS = [
   { key: "customer", label: "Customer" },
@@ -309,6 +325,26 @@ export default async function CustomerCardPage({
     .order("created_at", { ascending: false })
     .returns<Followup[]>();
   const followups = fData ?? [];
+
+  // Foreclosure / Seizure tab. Both tables are branch-scoped by RLS.
+  const { data: seizureData } = await supabase
+    .from("seizures")
+    .select("id, status, amount_paise, notes, created_at, exited_at, exit_reason")
+    .eq("customer_id", id)
+    .order("created_at", { ascending: false })
+    .returns<Seizure[]>();
+  const seizures = seizureData ?? [];
+
+  let foreclosures: Foreclosure[] = [];
+  if (activeLoan) {
+    const { data: fcData } = await supabase
+      .from("foreclosures")
+      .select("id, calculated_at, final_payable_paise, paid_at, noc_issued_at")
+      .eq("loan_id", activeLoan.id)
+      .order("calculated_at", { ascending: false })
+      .returns<Foreclosure[]>();
+    foreclosures = fcData ?? [];
+  }
 
   // Money is counted, not rows: two half-EMIs are one settled installment.
   const paidCount = balances?.installments_settled ?? 0;
@@ -974,7 +1010,88 @@ export default async function CustomerCardPage({
 
       {activeTab === "status" ? (
         <Panel title="Foreclosure / Seizure">
-          <Empty text="No foreclosure or seizure on record for this customer." />
+          {foreclosures.length || seizures.length ? (
+            <div className="space-y-4">
+              {seizures.length ? (
+                <div>
+                  <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Seizing
+                  </h3>
+                  <ul className="space-y-1.5 text-sm">
+                    {seizures.map((s) => (
+                      <li
+                        key={s.id}
+                        className="flex flex-wrap items-baseline gap-2 border-b border-border pb-1.5 last:border-0"
+                      >
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                            s.status === "active"
+                              ? "bg-danger-soft text-danger"
+                              : s.status === "pending"
+                                ? "bg-warning-soft text-warning"
+                                : "bg-success-soft text-success"
+                          }`}
+                        >
+                          {s.status === "pending"
+                            ? "Pending approval"
+                            : s.status === "active"
+                              ? "Seized"
+                              : "Released"}
+                        </span>
+                        <span>{fmtDate(s.created_at)}</span>
+                        <span className="font-medium">
+                          {formatINR(s.amount_paise)}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {s.exited_at
+                            ? `Released ${fmtDate(s.exited_at)}${s.exit_reason ? ` — ${s.exit_reason}` : ""}`
+                            : (s.notes ?? "")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {foreclosures.length ? (
+                <div>
+                  <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Foreclosure
+                  </h3>
+                  <ul className="space-y-1.5 text-sm">
+                    {foreclosures.map((f) => (
+                      <li
+                        key={f.id}
+                        className="flex flex-wrap items-baseline gap-2 border-b border-border pb-1.5 last:border-0"
+                      >
+                        <span>{fmtDate(f.calculated_at)}</span>
+                        <span className="font-medium">
+                          {formatINR(f.final_payable_paise)}
+                        </span>
+                        <span
+                          className={
+                            f.paid_at ? "text-success" : "text-warning"
+                          }
+                        >
+                          {f.paid_at
+                            ? `Paid ${fmtDate(f.paid_at)}${f.noc_issued_at ? " · NOC issued" : ""}`
+                            : "Unpaid"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <Empty text="No foreclosure or seizure on record for this customer." />
+          )}
+          <Link
+            href={`/dashboard/foreclosure?customer=${customer.id}`}
+            className="mt-4 inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            Open Foreclosure &amp; Seizing
+          </Link>
         </Panel>
       ) : null}
 

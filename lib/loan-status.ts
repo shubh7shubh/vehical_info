@@ -254,6 +254,35 @@ export function splitReceipt(opts: {
   return { towardsEmiPaise: towardsEmi, towardsPenaltyPaise: towardsPenalty };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Foreclosure eligibility — mirrors calculate_foreclosure()                   */
+/* -------------------------------------------------------------------------- */
+
+/** Six whole months from the loan start date — the client's rule. */
+export const FORECLOSURE_MIN_MONTHS = 6;
+
+/** The date a loan becomes eligible for foreclosure. */
+export function foreclosureEligibleFrom(startedAt: string | Date): Date {
+  const start = asDate(startedAt);
+  if (!start) throw new Error("A loan start date is required");
+  return addMonthsUTC(start, FORECLOSURE_MIN_MONTHS);
+}
+
+/**
+ * Whether a loan may be foreclosed yet. The server re-checks this in
+ * `record_foreclosure` — a disabled button is a courtesy, never the control.
+ */
+export function isForeclosureEligible(
+  startedAt: string | Date,
+  today?: Date,
+): boolean {
+  const start = asDate(startedAt);
+  if (!start) return false;
+  return (
+    monthsElapsed(start, today ?? new Date()) >= FORECLOSURE_MIN_MONTHS
+  );
+}
+
 /**
  * Convenience used by the customers list and the customer card: the reminder
  * colour for a loan, or null when there is no date to anchor the schedule.

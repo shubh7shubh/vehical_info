@@ -1,10 +1,9 @@
 # Naye Changes — Testing Guide (Hinglish)
 
-Namaste! Aapne jo **15 recordings** bheji thi, unme se **9 ka kaam ho gaya hai** —
-yeh sab **paisa aur pavti** se juda hua hai.
+Namaste! Aapne jo **15 recordings** bheji thi — **saari 15 ka kaam ho gaya hai**.
 
-Baaki **6** (Foreclosure aur Seizing ka naya page) **abhi ban raha hai** — woh
-agle round mein aayega. Neeche "Abhi jo baaki hai" mein poori list hai.
+- **9** paise aur pavti se judi thi → **Test 1 se 9**
+- **6** Foreclosure aur Seizing ke naye page ki thi → **Test 10 se 13**
 
 Yeh guide **sirf naye kaam ki** hai — poora system dobara test karne ki zarurat
 nahi.
@@ -45,6 +44,11 @@ woh option **nahi** dikhta.
 | 1 | Print par **First EMI date** | **Test 4** |
 | 12 | Print par **total baaki** aur **aaj kitna liya** | **Test 4** |
 | 15 | Print par poora hisaab (EMI, balance, penalty, kaunsa mahina baaki) | **Test 4** |
+| 4 | Foreclosure aur Seizing ka **alag page** | **Test 10** |
+| 5, 6 | Foreclosure sirf **6 mahine** ke baad | **Test 11** |
+| 7 | Seizing mein search + **Add Seizing** | **Test 12** |
+| 8 | Saara paisa bharne par **Exit Seizing** | **Test 13** |
+| 9 | Seizing hataana sirf Owner/Admin | **Test 13** |
 
 ---
 
@@ -296,6 +300,154 @@ poore hapte bharte aaye hain, unka rang **bilkul nahi badla** hoga.
 
 ---
 
+---
+
+## Test 10 — 🆕 Foreclosure aur Seizing ka naya page
+
+**Aapne kaha tha (recording 4):** *"फोरक्लोजर आणि सीझिंग साठी वेगळे पेज असावे.
+लोन नंबर टाकला की सर्व डिटेल दिसली पाहिजे."*
+
+1. Upar menu mein **Foreclosure** naam ka naya link hai — dabaiye
+   > Phone par ☰ (teen line) wale button se milega. Dashboard par bhi ek nayi
+   > tile hai.
+2. **Loan / account number** ke box mein `5001` daaliye → **Search**
+3. Naam par click kijiye
+
+✅ **Kya dikhna chahiye — "Loan details" ka box:**
+
+| Bayein taraf | Daayein taraf |
+|---|---|
+| Loan amount | Instalments paid |
+| Instalment / EMI | Months behind |
+| Tenure | EMI overdue |
+| **Loan start date** | Penalty balance |
+| First EMI date | Loan status |
+| Gaadi + RC number | **Total outstanding** |
+
+> **Note:** yahan "loan number" ka matlab wahi **account number** hai jo aap
+> book mein likhte ho. System mein alag se koi loan number nahi hai — agar aap
+> chahte ho ki alag number ho, toh bataiyega.
+
+---
+
+## Test 11 — 🆕 Foreclosure sirf 6 mahine ke baad
+
+**Aapne kaha tha (recordings 5 aur 6):** *"सहा महिने पूर्ण झाल्यावरच फोरक्लोजर
+करता आले पाहिजे. ज्यांचे सहा महिने झाले नाहीत त्यांचे बटन बंद असावे."*
+
+### Pehle ek **naya** customer banaiye (6 mahine se kam)
+
+Test 1 jaisa hi, lekin:
+- Account number `5002`, naam `Anil Kale`
+- **Purchase date: 3 mahine pehle**
+
+Ab **Foreclosure** page par `5002` search kijiye.
+
+✅ **Kya hona chahiye:**
+- **Peela banner:** *"Foreclosure opens six months after the loan start date.
+  This loan is 3 months old — eligible from (tareekh)"*
+- **Add Foreclosure** ka button **dhundhla aur band** — dabta hi nahi
+- Us par maus le jaaiye toh tareekh dikhegi
+
+### Ab purana customer (`5001`, 4 mahine)
+
+Yeh bhi 6 mahine ka nahi hai, toh button band hi rahega.
+
+**Poora test karne ke liye ek aur customer banaiye:**
+- Account `5003`, naam `Vijay More`, **purchase date 8 mahine pehle**
+
+✅ Ab `5003` par **Add Foreclosure** ka button **chaalu** ho jayega, aur upar
+poora hisaab dikhega:
+
+| Cheez | Matlab |
+|---|---|
+| Remaining months | Kitne hapte baaki |
+| EMI outstanding | Kul kitna paisa baaki |
+| Interest still scheduled | Aage ka byaj |
+| Penalty balance | Penalty baaki |
+| **Customer saves** | Customer ka fayda |
+| **Final payable** | **Customer ko kitna dena hai** |
+
+Do box aap badal sakte ho: **Interest waived** aur **Bank charge** (₹1,000 apne
+aap bhara hai).
+
+**Add Foreclosure** dabaiye → ✅ neeche list mein row aa jayegi (Unpaid).
+Jab customer paisa de de, toh **Mark paid** dabaiye → ✅ loan **band** ho jayega.
+
+### 📌 Ek baat poochhni hai
+
+Foreclosure ka hisaab humne aise lagaya hai:
+
+> **Jo paisa baaki hai − jitna byaj maaf kiya + ₹1,000 bank charge + penalty**
+
+👉 **Bataiye yeh sahi hai?** Aur ₹1,000 bank charge har baar ek hi rehta hai, ya
+badalta hai?
+
+---
+
+## Test 12 — 🆕 Seizing ki entry
+
+**Aapne kaha tha (recording 7):** *"सीझिंग मध्ये सर्च ऑप्शन असावा आणि ॲड सीझिंगचे
+बटन असावे."*
+
+Usi page par neeche **Seizing** ka box hai.
+
+### Admin se
+
+1. `5001` (Suresh) kholiye → **Seizing** box
+2. **Seizing charges** `1000`, **Notes** `Gaadi uthai gayi`
+3. **Approve now** par tick laga rahne dijiye → **Add Seizing** dabaiye
+
+✅ Laal pill **"Seized"** dikhega, tareekh aur rakam ke saath.
+✅ Sabse neeche **"Currently seized"** ki list mein woh customer aa jayega.
+
+### ⚠️ Ab Employee se login kar ke dekhiye
+
+Kisi doosre customer par **Add Seizing** dabaiye.
+
+✅ Employee ki entry **"Pending approval"** (peeli) rehti hai — neeche likha hoga:
+*"Your entry is saved as pending until a branch admin approves the amount."*
+✅ Admin se login karke **Approve seizing** dabaiye (rakam badal bhi sakte ho) →
+✅ ab **"Seized"** ho jayega.
+
+---
+
+## Test 13 — 🆕 Exit Seizing — aur woh sirf Admin kar sakta hai
+
+**Aapne kaha tha (recording 8):** *"सर्व येणे, पेनल्टी आणि फोरक्लोजरची पूर्ण रक्कम
+भरली की सीझिंग मधून काढून टाकावे."*
+**(recording 9):** *"सीझिंग मधून काढण्याचा अधिकार फक्त मालक आणि ऍडमिनला असावा."*
+
+### Pehle dekhiye ki paisa baaki ho toh system rok deta hai
+
+Suresh (`5001`) ka abhi bahut paisa baaki hai.
+
+✅ **Exit Seizing** ka button **band** hoga, aur neeche laal-safed mein likha hoga:
+> *"₹XX,XXX is still outstanding (dues + penalty). The customer can only leave
+> seizing once that, and any recorded foreclosure amount, is cleared."*
+
+### Ab saara paisa bhar kar dekhiye
+
+1. Suresh ke customer page par jaakar **saare baaki hapte aur penalty** bhar
+   dijiye (Amount received mein poora **Total outstanding** daal dijiye)
+2. Wapas **Foreclosure** page par `5001` kholiye
+
+✅ Ab **Exit Seizing** ka button **chaalu** ho jayega.
+3. **Reason** mein `Saara paisa bhar diya` likhiye → **Exit Seizing** dabaiye
+
+✅ Green banner **"Customer removed from seizing"**
+✅ "Currently seized" list se woh customer **hat jayega**
+✅ Neeche chhote akshar mein *"Released (tareekh) — Saara paisa bhar diya"*
+
+### ⚠️ Employee se check kijiye
+
+Employee login se kisi seize kiye hue customer par jaaiye.
+
+✅ **Exit Seizing** ka button **band** hoga, aur likha hoga:
+> *"Only a branch admin can remove a customer from seizing."*
+
+---
+
 ## 📋 Wapas humein kya batana hai
 
 | # | Cheez | Theek hai? | Notes |
@@ -311,7 +463,12 @@ poore hapte bharte aaye hain, unka rang **bilkul nahi badla** hoga.
 | 9 | **Purani penalty** — jo pichle mahino ki hai, woh bhi lagni chahiye ya aaj se? | | ⬅️ zaroor bataiye |
 | 10 | Penalty badalna **sirf Admin** — theek hai ya Owner ko bhi chahiye? | | ⬅️ zaroor bataiye |
 | 11 | Employee ko penalty ka option **nahi** dikha — sahi? | Haan / Nahi | |
-| 12 | Phone par sab theek dikha? | Haan / Nahi | |
+| 12 | **Foreclosure page** par loan number se detail mili? | Haan / Nahi | |
+| 13 | **6 mahine** wala niyam sahi chala? | Haan / Nahi | |
+| 14 | Foreclosure ka **hisaab** sahi hai? (Test 11 dekhiye) | | ⬅️ zaroor bataiye |
+| 15 | **Add Seizing** aur Approve theek chala? | Haan / Nahi | |
+| 16 | **Exit Seizing** ka rok-tok sahi hai? | Haan / Nahi | |
+| 17 | Phone par sab theek dikha? | Haan / Nahi | |
 
 ### ⬅️ Teen sawaal jinke jawab humein chahiye
 
@@ -335,20 +492,16 @@ hai, toh system ab **poore 2 saal ki penalty** laga dega (₹500 × 24 = ₹12,0
 
 ## Abhi jo baaki hai (agle round mein)
 
-Aapki **recordings 4 se 9 tak** — **Foreclosure aur Seizing ka naya page**:
+Aapki 15 recordings ka kaam **poora ho gaya**. Aage yeh cheezein aayengi, jo
+pehle se plan mein thi:
 
-- Alag page jisme **loan number** daal kar customer ki poori detail dikhe
-- **Add Foreclosure** ka button — sirf un customers ke liye jinke **6 mahine
-  poore** ho gaye hain (jinke nahi hue, unka button band rahega)
-- **Add Seizing** ka button, aur seize kiye hue customers ki list
-- **Exit Seizing** — jab customer saara paisa, penalty aur foreclosure ki poori
-  rakam bhar de, tab usse seizing se hataana (sirf Admin)
-
-Yeh isliye baad mein rakha kyunki **"saara paisa bhar diya"** check karne ke liye
-pehle upar wala paisa ka hisaab sahi hona zaroori tha — woh ab ho gaya hai.
-
-Uske baad: **Bank Recovery lists**, **Daily Summary**, **Pending list**
-(0/1/3/5 ke hisaab se), **Documents & Keys**.
+- **Pending list** — 0 / 1 / 3 / 5 / Below 3 / Above 5 ke hisaab se filter
+- **Bank Recovery** — dono bank ki alag-alag rangeen list
+- **Daily Summary** — din bhar ka cash / online / penalty ka hisaab
+- **Documents & Keys** — kagaz aur chaabi ka record
+- **OTP** — penalty badalne, foreclosure aur seizing par mobile OTP ki suraksha
+- **Penalty apne aap har raat** — abhi penalty tab lagti hai jab aap customer ka
+  page kholte ho ya paisa bharte ho. Aage woh har raat khud lag jayegi.
 
 ---
 

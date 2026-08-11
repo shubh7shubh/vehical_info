@@ -533,6 +533,68 @@ monthly fixed), and the 0/1/3/5/Below-3/Above-5 pending list page.
 
 ---
 
+## Phase 4.95 — Client Feedback Round 3, Slice B ✅ SHIPPED (2026-08-12)
+
+Recordings 4 to 9 — the Foreclosure & Seizing screen. Sequenced after slice A
+because "Exit Seizing" needs a trustworthy outstanding-balance figure, and slice A
+is what produces it.
+
+`public.foreclosures` and `public.seizures` had existed since the Phase 2 schema
+with branch columns, triggers and RLS, and had never had a reader or a writer. Two
+migrations add only the columns the screen needs.
+
+### Decisions
+
+- **No new enum value.** Exit Seizing is `seizure_status = 'resolved'` plus a new
+  `exited_at`. `'resolved'` already means "seizure concluded"; a synonym would
+  have forced its own migration file (`ALTER TYPE … ADD VALUE` cannot be used in
+  the transaction that adds it) for no gain. `exited_at` is what separates
+  "released because they paid" from any future "resolved by sale".
+- **"Loan number" means `customers.account_no`.** There is no loan-number column,
+  and inventing `loans.loan_no` would hand the branch an identifier that does not
+  exist in their books. The search box is labelled "Loan / account number" and
+  runs the existing `search_customers`.
+- **The foreclosure quote is derived, the judgement calls are not.** `loans` has
+  no interest column, so `total_interest = emi × tenure − principal`, split
+  straight-line across the tenure — explainable across a counter, unlike
+  rule-of-78. The **interest waiver** (defaulting to the whole remaining interest)
+  and the **bank charge** (₹1,000, PRD §3.7) stay operator-editable.
+  PRD §3.7's worked example is internally inconsistent — "₹6,000 − ₹1,000 =
+  ₹5,000" describes the customer's *saving*, not the payable — so
+  `customer_saving_paise` and `final_payable_paise` are returned and labelled
+  separately. Flagged for the client.
+- **Exit Seizing checks arrears, not the whole loan.** A customer who has caught
+  up mid-tenure gets the vehicle back. Requiring the entire remaining balance
+  would mean nobody is ever released, which is neither what recording 8 describes
+  nor what happens in practice. The "complete foreclosure amount" clause is
+  covered by refusing while an unpaid quote exists.
+- **Admin-only**, consistent with slice A and for the same reason.
+
+### RPCs
+
+`calculate_foreclosure` (read-only preview, reports `eligible` +
+`eligible_from`), `record_foreclosure` (admin; **re-checks the six-month rule
+server-side** — the disabled button is a courtesy), `settle_foreclosure` (admin;
+closes the loan as `foreclosed`), `record_seizure` (employee → `pending`, admin
+may approve inline), `approve_seizure` (admin; the amount is editable at approval,
+which is the point of the step), `exit_seizure` (admin; accrues penalties first,
+then refuses while arrears, penalty or an unpaid quote remain, naming the figure
+that blocks it), `closure_lookup` and `seized_customers` behind the screen.
+
+Guarded by `foreclosures_open_uq` (one unpaid quote per loan) and
+`seizures_open_uq` (one live seizure per customer), so a double-click cannot
+leave the records ambiguous.
+
+**Tests:** 58 Vitest cases, 105 pgTAP assertions. Fixtures `FORE-1` (7 months, in
+arrears), `FORE-2` (3 months, not eligible) and `FORE-3` (7 months, every
+instalment paid on its own due date so nothing accrued — the Exit Seizing happy
+path).
+
+**Deferred:** OTP gating on these actions (Phase 6, as originally planned), and
+the NOC / key-handover detail beyond the `noc_issued_at` flag.
+
+---
+
 ## Phase 5 — Day 5: Bank Recovery + Daily Summary + Foreclosure + Seizure
 **Demo:** Two color-coded bank recovery lists, end-of-day summary screen, foreclosure calculator, seizure entry with admin approval state.
 
